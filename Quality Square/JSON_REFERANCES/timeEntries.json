@@ -1,0 +1,27 @@
+[
+  {
+    "id": "cbyWhYQzjo0FHoHqh81d",
+    "employeeId": "Fkn8AA1pQtqZa5b6PN6s",
+    "clockIn": {
+      "_seconds": 1765161250,
+      "_nanoseconds": 479000000
+    },
+    "payPeriodId": "34x7V422Gcsecs9AnN4w",
+    "duration": 0.016563055555555557,
+    "clockOut": {
+      "_seconds": 1765161310,
+      "_nanoseconds": 106000000
+    }
+  },
+  {
+    "id": "z1Dht7ye7ZuwHzPqgJSP",
+    "employeeId": "Fkn8AA1pQtqZa5b6PN6s",
+    "clockIn": {
+      "_seconds": 1765161924,
+      "_nanoseconds": 167000000
+    },
+    "clockOut": null,
+    "duration": null,
+    "payPeriodId": "34x7V422Gcsecs9AnN4w"
+  }
+]

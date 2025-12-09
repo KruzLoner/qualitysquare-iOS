@@ -1,0 +1,78 @@
+[
+  {
+    "id": "IBytEpFacWZPXTFozvMX",
+    "name": "Aubrey's Team",
+    "leaderId": "le6gflSPSotV1KQ9yun0",
+    "leaderName": "Aubrey",
+    "members": [
+      {
+        "employeeId": "le6gflSPSotV1KQ9yun0",
+        "employeeName": "Aubrey",
+        "employeeRole": "Technician"
+      },
+      {
+        "employeeId": "v7dK8o9hAVo3zkDyyizx",
+        "employeeName": "Saba",
+        "employeeRole": "Helper"
+      }
+    ],
+    "createdAt": {
+      "_seconds": 1765077556,
+      "_nanoseconds": 555000000
+    },
+    "updatedAt": {
+      "_seconds": 1765077556,
+      "_nanoseconds": 555000000
+    }
+  },
+  {
+    "id": "frJPU0uRSwopDKhsR3Ii",
+    "name": "Aron's Team",
+    "leaderId": "Fkn8AA1pQtqZa5b6PN6s",
+    "leaderName": "Aron",
+    "createdAt": {
+      "_seconds": 1764870944,
+      "_nanoseconds": 649000000
+    },
+    "members": [
+      {
+        "id": "unknown_1765063595746",
+        "employeeId": "Fkn8AA1pQtqZa5b6PN6s",
+        "employeeName": "Aron"
+      },
+      {
+        "employeeId": "nV4z7LxBKOyaAHasuCYg",
+        "employeeName": "Bobby",
+        "employeeRole": "Helper"
+      }
+    ],
+    "updatedAt": {
+      "_seconds": 1765063603,
+      "_nanoseconds": 230000000
+    }
+  },
+  {
+    "id": "jX3iIvvPFgu71zAC9oss",
+    "name": "Moe's Team",
+    "leaderId": "jVFKy1SX4nC3cffWh1Qs",
+    "leaderName": "Moe",
+    "members": [
+      {
+        "employeeId": "jVFKy1SX4nC3cffWh1Qs",
+        "employeeName": "Moe"
+      },
+      {
+        "employeeId": "V2lTNcYx5yik1oAcj6fL",
+        "employeeName": "Al"
+      }
+    ],
+    "createdAt": {
+      "_seconds": 1764870923,
+      "_nanoseconds": 982000000
+    },
+    "updatedAt": {
+      "_seconds": 1764870923,
+      "_nanoseconds": 982000000
+    }
+  }
+]
