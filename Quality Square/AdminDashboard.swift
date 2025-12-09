@@ -16,7 +16,6 @@ struct AdminDashboard: View {
     @State private var allEmployees: [Employee] = []
     @State private var employeeStatuses: [EmployeeStatus] = []
     @State private var teams: [Team] = []
-    @State private var timeEntries: [TimeEntry] = []
     @State private var isLoading = false
     @State private var showingLogoutConfirm = false
     @State private var selectedTab = 0
@@ -67,10 +66,10 @@ struct AdminDashboard: View {
                     
                     // Tab Picker
                     Picker("View", selection: $selectedTab) {
-                        Text("Employees").tag(0)
+                        Text("Attendance").tag(0)
                         Text("Jobs").tag(1)
                         Text("Teams").tag(2)
-                        Text("Time Entries").tag(3)
+                        Text("Employees").tag(3)
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal, 20)
@@ -96,7 +95,7 @@ struct AdminDashboard: View {
 
                     // Content
                     TabView(selection: $selectedTab) {
-                        // Employees Tab
+                        // Today's Attendance Tab
                         ScrollView {
                             VStack(spacing: 20) {
                                 // Stats Cards
@@ -107,7 +106,7 @@ struct AdminDashboard: View {
                                         icon: "clock.fill",
                                         color: .green
                                     )
-                                    
+
                                     StatCard(
                                         title: "Clocked Out",
                                         value: "\(clockedOutCount)",
@@ -117,13 +116,13 @@ struct AdminDashboard: View {
                                 }
                                 .padding(.horizontal, 20)
                                 .padding(.top, 8)
-                                
+
                                 // Today's Clock Records
                                 VStack(alignment: .leading, spacing: 16) {
                                     Text("Today's Activity")
                                         .font(.headline)
                                         .padding(.horizontal, 20)
-                                    
+
                                     if clockRecords.isEmpty {
                                         EmptyStateView(
                                             icon: "person.2.slash",
@@ -135,10 +134,10 @@ struct AdminDashboard: View {
                                         }
                                     }
                                 }
-                                
-                                // All Employees Status Table
+
+                                // Employee Status Summary
                                 VStack(alignment: .leading, spacing: 16) {
-                                    Text("All Employees")
+                                    Text("Employee Status")
                                         .font(.headline)
                                         .padding(.horizontal, 20)
                                         .padding(.top, 8)
@@ -154,7 +153,7 @@ struct AdminDashboard: View {
                                         }
                                     }
                                 }
-                                
+
                                 Spacer()
                                     .frame(height: 40)
                             }
@@ -269,42 +268,42 @@ struct AdminDashboard: View {
                         }
                         .tag(2)
 
-                        // Time Entries Tab
+                        // Employees Tab
                         ScrollView {
                             VStack(spacing: 20) {
-                                // Time Entry Stats
+                                // Employee Stats
                                 HStack(spacing: 12) {
                                     StatCard(
-                                        title: "Total Entries",
-                                        value: "\(timeEntries.count)",
-                                        icon: "clock.fill",
+                                        title: "Total Employees",
+                                        value: "\(allEmployees.count)",
+                                        icon: "person.3.fill",
                                         color: .blue
                                     )
 
                                     StatCard(
                                         title: "Active",
-                                        value: "\(timeEntries.filter { $0.isActive }.count)",
-                                        icon: "clock.badge.checkmark",
+                                        value: "\(allEmployees.filter { $0.isActive }.count)",
+                                        icon: "checkmark.circle.fill",
                                         color: .green
                                     )
                                 }
                                 .padding(.horizontal, 20)
                                 .padding(.top, 8)
 
-                                // Time Entries List
+                                // All Employees List
                                 VStack(alignment: .leading, spacing: 16) {
-                                    Text("Recent Time Entries")
+                                    Text("All Employees")
                                         .font(.headline)
                                         .padding(.horizontal, 20)
 
-                                    if timeEntries.isEmpty {
+                                    if allEmployees.isEmpty {
                                         EmptyStateView(
-                                            icon: "clock",
-                                            message: "No time entries found"
+                                            icon: "person.3",
+                                            message: "No employees found"
                                         )
                                     } else {
-                                        ForEach(timeEntries) { entry in
-                                            TimeEntryRow(entry: entry, employees: allEmployees)
+                                        ForEach(allEmployees) { employee in
+                                            EmployeeListRow(employee: employee)
                                         }
                                     }
                                 }
@@ -401,20 +400,6 @@ struct AdminDashboard: View {
                 case .failure(let error):
                     print("❌ [AdminDashboard] Error loading teams: \(error.localizedDescription)")
                     errorMessage = "Failed to load teams: \(error.localizedDescription)"
-                }
-            }
-        }
-
-        // Load time entries
-        firestoreManager.getAllTimeEntries { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let entries):
-                    timeEntries = entries
-                    print("✅ [AdminDashboard] Loaded \(entries.count) time entry(ies)")
-                case .failure(let error):
-                    print("❌ [AdminDashboard] Error loading time entries: \(error.localizedDescription)")
-                    errorMessage = "Failed to load time entries: \(error.localizedDescription)"
                 }
             }
         }
@@ -855,120 +840,58 @@ struct TeamRow: View {
     }
 }
 
-// MARK: - Time Entry Row
-struct TimeEntryRow: View {
-    let entry: TimeEntry
-    let employees: [Employee]
-
-    var employeeName: String {
-        employees.first(where: { $0.id == entry.employeeId })?.name ?? "Unknown"
-    }
+// MARK: - Employee List Row
+struct EmployeeListRow: View {
+    let employee: Employee
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack {
-                Image(systemName: "person.circle.fill")
-                    .font(.title3)
-                    .foregroundColor(.blue.opacity(0.7))
+        HStack(spacing: 12) {
+            Image(systemName: "person.circle.fill")
+                .font(.title2)
+                .foregroundColor(.blue.opacity(0.7))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(employeeName)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(employee.name)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
 
-                    Text(formatDate(entry.clockIn))
+                if let email = employee.email {
+                    Text(email)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else if let pin = employee.pin {
+                    Text("PIN: \(pin)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-
-                Spacer()
-
-                if entry.isActive {
-                    Text("Active")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(.green.opacity(0.15))
-                        )
-                        .foregroundColor(.green)
-                }
             }
 
-            Divider()
-                .padding(.vertical, 4)
+            Spacer()
 
-            // Time Details
-            VStack(spacing: 8) {
-                HStack {
-                    Image(systemName: "arrow.right.circle.fill")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                    Text("Clock In:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(formatTime(entry.clockIn))
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    Spacer()
-                }
+            // Status Badge
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(employee.isActive ? Color.green : Color.gray)
+                    .frame(width: 8, height: 8)
 
-                if let clockOut = entry.clockOut {
-                    HStack {
-                        Image(systemName: "arrow.left.circle.fill")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                        Text("Clock Out:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(formatTime(clockOut))
-                            .font(.caption)
-                            .fontWeight(.medium)
-                        Spacer()
-                    }
-                }
-
-                if let hours = entry.hoursWorked {
-                    HStack {
-                        Image(systemName: "clock.fill")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                        Text("Duration:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(String(format: "%.2f hrs", hours))
-                            .font(.caption)
-                            .fontWeight(.medium)
-                        Spacer()
-                    }
-                }
+                Text(employee.status.capitalized)
+                    .font(.caption)
+                    .fontWeight(.medium)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(employee.isActive ? Color.green.opacity(0.15) : Color.gray.opacity(0.15))
+            )
+            .foregroundColor(employee.isActive ? .green : .gray)
         }
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(entry.isActive ? Color.green.opacity(0.3) : Color.gray.opacity(0.2), lineWidth: 1)
-        )
         .padding(.horizontal, 20)
-    }
-
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        return formatter.string(from: date)
-    }
-
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
     }
 }
 

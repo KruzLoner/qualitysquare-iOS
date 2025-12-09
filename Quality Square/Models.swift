@@ -51,16 +51,16 @@ struct ClockRecord: Identifiable, Codable {
     var clockInTime: Date
     var clockOutTime: Date?
     var date: String // Format: "YYYY-MM-DD" for easy querying
-    
+
     var isClocked: Bool {
         clockOutTime == nil
     }
-    
+
     var duration: TimeInterval? {
         guard let clockOut = clockOutTime else { return nil }
         return clockOut.timeIntervalSince(clockInTime)
     }
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case employeeId
@@ -68,6 +68,16 @@ struct ClockRecord: Identifiable, Codable {
         case clockInTime
         case clockOutTime
         case date
+    }
+
+    // Custom initializer for creating ClockRecord manually
+    init(id: String? = nil, employeeId: String, employeeName: String, clockInTime: Date, clockOutTime: Date?, date: String) {
+        self._id = DocumentID(wrappedValue: id)
+        self.employeeId = employeeId
+        self.employeeName = employeeName
+        self.clockInTime = clockInTime
+        self.clockOutTime = clockOutTime
+        self.date = date
     }
 }
 

@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Employees - allow read by all, write by authenticated users
+    match /employees/{employeeId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Clock Records - allow read/write by all (for employee clock in/out and admin viewing)
+    match /clockRecords/{recordId} {
+      allow read, write: if true;
+    }
+
+    // Time Entries - allow read/write by all (for employee clock in/out)
+    match /timeEntries/{entryId} {
+      allow read, write: if true;
+    }
+
+    // Pay Periods - allow read by all, write by authenticated users
+    match /payPeriods/{periodId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Admins - allow read/write by authenticated users only
+    match /admins/{adminId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Jobs - allow read by all, write by authenticated users and employees
+    match /jobs/{jobId} {
+      allow read: if true;
+      allow write: if true; // Allow both admins and employees to update
+    }
+
+    // Team Updates (legacy, can be removed if not used)
+    match /teamUpdates/{updateId} {
+      allow read, write: if true;
+    }
+
+    // Teams - allow read by all, write by authenticated users
+    match /teams/{teamId} {
+      allow read: if true;
+      allow write: if true; // Allow both admins and employees to access teams
+    }
+  }
+}

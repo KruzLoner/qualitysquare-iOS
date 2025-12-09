@@ -227,26 +227,70 @@ class FirestoreManager: ObservableObject {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateString = dateFormatter.string(from: Date())
-        
-        db.collection("clockRecords")
-            .whereField("date", isEqualTo: dateString)
-            .order(by: "clockInTime", descending: false)
-            .getDocuments { snapshot, error in
+
+        print("🔍 [FirestoreManager] Fetching ALL time entries (not filtering by date)...")
+
+        // Query all timeEntries - let's see what's there first
+        db.collection("timeEntries")
+            .order(by: "clockIn", descending: true)
+            .limit(to: 50)
+            .getDocuments { [weak self] snapshot, error in
                 if let error = error {
+                    print("❌ [FirestoreManager] Error fetching time entries: \(error.localizedDescription)")
                     completion(.failure(error))
                     return
                 }
-                
+
                 guard let documents = snapshot?.documents else {
+                    print("⚠️ [FirestoreManager] No documents returned from timeEntries query")
                     completion(.success([]))
                     return
                 }
-                
-                let records = documents.compactMap { doc -> ClockRecord? in
-                    try? doc.data(as: ClockRecord.self)
+
+                print("📄 [FirestoreManager] Retrieved \(documents.count) time entry document(s)")
+
+                // Debug: Print first few entries
+                for (index, doc) in documents.prefix(3).enumerated() {
+                    let data = doc.data()
+                    print("   Entry \(index + 1): employeeId=\(data["employeeId"] ?? "nil"), clockIn=\(data["clockIn"] ?? "nil"), clockOut=\(data["clockOut"] ?? "nil")")
                 }
-                
-                completion(.success(records))
+
+                // Fetch employee data to get names
+                self?.db.collection("employees").getDocuments { employeeSnapshot, employeeError in
+                    let employeeMap = employeeSnapshot?.documents.reduce(into: [String: String]()) { result, doc in
+                        result[doc.documentID] = doc.data()["name"] as? String
+                    } ?? [:]
+
+                    print("📋 [FirestoreManager] Employee map has \(employeeMap.count) entries")
+
+                    let records = documents.compactMap { doc -> ClockRecord? in
+                        do {
+                            let timeEntry = try doc.data(as: TimeEntry.self)
+                            guard let employeeName = employeeMap[timeEntry.employeeId] else {
+                                print("⚠️ [FirestoreManager] Could not find employee name for ID: \(timeEntry.employeeId)")
+                                return nil
+                            }
+
+                            print("✅ Converting entry: \(employeeName) - clockIn: \(timeEntry.clockIn), clockOut: \(timeEntry.clockOut?.description ?? "nil")")
+
+                            // Convert TimeEntry to ClockRecord
+                            return ClockRecord(
+                                id: timeEntry.id,
+                                employeeId: timeEntry.employeeId,
+                                employeeName: employeeName,
+                                clockInTime: timeEntry.clockIn,
+                                clockOutTime: timeEntry.clockOut,
+                                date: dateString
+                            )
+                        } catch {
+                            print("❌ [FirestoreManager] Error decoding time entry: \(error)")
+                            return nil
+                        }
+                    }
+
+                    print("✅ [FirestoreManager] Successfully parsed \(records.count) clock record(s)")
+                    completion(.success(records))
+                }
             }
     }
     
