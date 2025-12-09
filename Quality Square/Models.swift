@@ -14,6 +14,7 @@ struct Employee: Identifiable, Codable {
     var name: String
     var pin: String?
     var email: String?
+    var role: String?
     var status: String
     var createdAt: Date
 
@@ -27,6 +28,7 @@ struct Employee: Identifiable, Codable {
         case name
         case pin
         case email
+        case role
         case status
         case createdAt
     }
@@ -38,6 +40,7 @@ struct Employee: Identifiable, Codable {
         self.name = try container.decode(String.self, forKey: .name)
         self.pin = try container.decodeIfPresent(String.self, forKey: .pin)
         self.email = try container.decodeIfPresent(String.self, forKey: .email)
+        self.role = try container.decodeIfPresent(String.self, forKey: .role)
         self.status = try container.decodeIfPresent(String.self, forKey: .status) ?? "active"
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
     }

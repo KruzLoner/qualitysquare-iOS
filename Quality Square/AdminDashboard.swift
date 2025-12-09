@@ -374,17 +374,6 @@ struct AdminDashboard: View {
             }
         }
     }
-
-    private func updateEmployeeStatuses() {
-        employeeStatuses = allEmployees.map { employee in
-            let clockRecord = clockRecords.first(where: { $0.employeeId == employee.id })
-            return EmployeeStatus(
-                id: employee.id ?? UUID().uuidString,
-                employee: employee,
-                clockRecord: clockRecord
-            )
-        }
-    }
 }
 
 // MARK: - Stat Card
@@ -844,14 +833,28 @@ struct EmployeeListRow: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                if let email = employee.email {
-                    Text(email)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else if let pin = employee.pin {
-                    Text("PIN: \(pin)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                HStack(spacing: 4) {
+                    if let role = employee.role {
+                        Text(role)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if let role = employee.role, let pin = employee.pin {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if let pin = employee.pin {
+                        Text("PIN: \(pin)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else if let email = employee.email {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
