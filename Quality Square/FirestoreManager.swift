@@ -224,16 +224,20 @@ class FirestoreManager: ObservableObject {
     // MARK: - Admin Functions
     
     func getTodayClockedInEmployees(completion: @escaping (Result<[ClockRecord], Error>) -> Void) {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: Date())
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateString = dateFormatter.string(from: Date())
 
-        print("🔍 [FirestoreManager] Fetching ALL time entries (not filtering by date)...")
+        print("🔍 [FirestoreManager] Fetching currently clocked-in employees for today: \(dateString)")
 
-        // Query all timeEntries - let's see what's there first
+        // Query timeEntries where clockOut is null (currently clocked in) and clockIn is today
         db.collection("timeEntries")
-            .order(by: "clockIn", descending: true)
-            .limit(to: 50)
+            .whereField("clockIn", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
+            .whereField("clockIn", isLessThan: Timestamp(date: endOfDay))
             .getDocuments { [weak self] snapshot, error in
                 if let error = error {
                     print("❌ [FirestoreManager] Error fetching time entries: \(error.localizedDescription)")
@@ -249,12 +253,6 @@ class FirestoreManager: ObservableObject {
 
                 print("📄 [FirestoreManager] Retrieved \(documents.count) time entry document(s)")
 
-                // Debug: Print first few entries
-                for (index, doc) in documents.prefix(3).enumerated() {
-                    let data = doc.data()
-                    print("   Entry \(index + 1): employeeId=\(data["employeeId"] ?? "nil"), clockIn=\(data["clockIn"] ?? "nil"), clockOut=\(data["clockOut"] ?? "nil")")
-                }
-
                 // Fetch employee data to get names
                 self?.db.collection("employees").getDocuments { employeeSnapshot, employeeError in
                     let employeeMap = employeeSnapshot?.documents.reduce(into: [String: String]()) { result, doc in
@@ -263,15 +261,22 @@ class FirestoreManager: ObservableObject {
 
                     print("📋 [FirestoreManager] Employee map has \(employeeMap.count) entries")
 
+                    // Filter for only currently clocked in (clockOut is null) and convert to ClockRecord
                     let records = documents.compactMap { doc -> ClockRecord? in
                         do {
                             let timeEntry = try doc.data(as: TimeEntry.self)
+
+                            // Only include if clockOut is null (still clocked in)
+                            guard timeEntry.clockOut == nil else {
+                                return nil
+                            }
+
                             guard let employeeName = employeeMap[timeEntry.employeeId] else {
                                 print("⚠️ [FirestoreManager] Could not find employee name for ID: \(timeEntry.employeeId)")
                                 return nil
                             }
 
-                            print("✅ Converting entry: \(employeeName) - clockIn: \(timeEntry.clockIn), clockOut: \(timeEntry.clockOut?.description ?? "nil")")
+                            print("✅ Currently clocked in: \(employeeName) - since \(timeEntry.clockIn)")
 
                             // Convert TimeEntry to ClockRecord
                             return ClockRecord(
@@ -288,7 +293,7 @@ class FirestoreManager: ObservableObject {
                         }
                     }
 
-                    print("✅ [FirestoreManager] Successfully parsed \(records.count) clock record(s)")
+                    print("✅ [FirestoreManager] Successfully parsed \(records.count) currently clocked-in employee(s)")
                     completion(.success(records))
                 }
             }

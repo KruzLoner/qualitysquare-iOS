@@ -14,20 +14,11 @@ struct AdminDashboard: View {
     @State private var clockRecords: [ClockRecord] = []
     @State private var todayJobs: [Job] = []
     @State private var allEmployees: [Employee] = []
-    @State private var employeeStatuses: [EmployeeStatus] = []
     @State private var teams: [Team] = []
     @State private var isLoading = false
     @State private var showingLogoutConfirm = false
     @State private var selectedTab = 0
     @State private var errorMessage: String?
-    
-    var clockedInCount: Int {
-        clockRecords.filter { $0.isClocked }.count
-    }
-    
-    var clockedOutCount: Int {
-        clockRecords.filter { !$0.isClocked }.count
-    }
     
     var body: some View {
         NavigationView {
@@ -101,55 +92,36 @@ struct AdminDashboard: View {
                                 // Stats Cards
                                 HStack(spacing: 12) {
                                     StatCard(
-                                        title: "Clocked In",
-                                        value: "\(clockedInCount)",
-                                        icon: "clock.fill",
+                                        title: "Currently Clocked In",
+                                        value: "\(clockRecords.count)",
+                                        icon: "person.2.fill",
                                         color: .green
                                     )
 
                                     StatCard(
-                                        title: "Clocked Out",
-                                        value: "\(clockedOutCount)",
-                                        icon: "clock.badge.checkmark",
-                                        color: .gray
+                                        title: "Total Employees",
+                                        value: "\(allEmployees.count)",
+                                        icon: "person.3.fill",
+                                        color: .blue
                                     )
                                 }
                                 .padding(.horizontal, 20)
                                 .padding(.top, 8)
 
-                                // Today's Clock Records
+                                // Currently Clocked In Employees
                                 VStack(alignment: .leading, spacing: 16) {
-                                    Text("Today's Activity")
+                                    Text("Currently Working")
                                         .font(.headline)
                                         .padding(.horizontal, 20)
 
                                     if clockRecords.isEmpty {
                                         EmptyStateView(
                                             icon: "person.2.slash",
-                                            message: "No employee activity today"
+                                            message: "No employees currently clocked in"
                                         )
                                     } else {
                                         ForEach(clockRecords) { record in
-                                            ClockRecordRow(record: record)
-                                        }
-                                    }
-                                }
-
-                                // Employee Status Summary
-                                VStack(alignment: .leading, spacing: 16) {
-                                    Text("Employee Status")
-                                        .font(.headline)
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 8)
-
-                                    if employeeStatuses.isEmpty {
-                                        EmptyStateView(
-                                            icon: "person.3",
-                                            message: "No employees found"
-                                        )
-                                    } else {
-                                        ForEach(employeeStatuses) { status in
-                                            DetailedEmployeeStatusRow(status: status)
+                                            ActiveClockRecordRow(record: record)
                                         }
                                     }
                                 }
@@ -347,8 +319,7 @@ struct AdminDashboard: View {
                 switch result {
                 case .success(let records):
                     clockRecords = records
-                    updateEmployeeStatuses()
-                    print("✅ [AdminDashboard] Loaded \(records.count) clock record(s)")
+                    print("✅ [AdminDashboard] Loaded \(records.count) currently clocked-in employee(s)")
                 case .failure(let error):
                     print("❌ [AdminDashboard] Error loading clock records: \(error.localizedDescription)")
                     errorMessage = "Failed to load clock records: \(error.localizedDescription)"
@@ -377,7 +348,6 @@ struct AdminDashboard: View {
                 switch result {
                 case .success(let employees):
                     allEmployees = employees
-                    updateEmployeeStatuses()
                     print("✅ [AdminDashboard] Loaded \(employees.count) employee(s)")
 
                     if employees.isEmpty {
@@ -449,49 +419,46 @@ struct StatCard: View {
     }
 }
 
-// MARK: - Clock Record Row
-struct ClockRecordRow: View {
+// MARK: - Active Clock Record Row
+struct ActiveClockRecordRow: View {
     let record: ClockRecord
-    
+    @State private var currentDuration: String = ""
+
+    private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(record.isClocked ? Color.green : Color.gray)
-                .frame(width: 10, height: 10)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(record.employeeName)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                HStack(spacing: 8) {
-                    Text("In: \(formatTime(record.clockInTime))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    if let clockOut = record.clockOutTime {
-                        Text("•")
-                            .foregroundColor(.secondary)
-                        Text("Out: \(formatTime(clockOut))")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                // Employee info
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 10, height: 10)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(record.employeeName)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+
+                        Text("Clocked in at \(formatTime(record.clockInTime))")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
-            }
-            
-            Spacer()
-            
-            if record.isClocked {
-                Text("Active")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(.green.opacity(0.15))
-                    )
-                    .foregroundColor(.green)
+
+                Spacer()
+
+                // Duration badge
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(currentDuration)
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(.green)
+
+                    Text("working")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .padding(16)
@@ -499,9 +466,31 @@ struct ClockRecordRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+        )
         .padding(.horizontal, 20)
+        .onAppear {
+            updateDuration()
+        }
+        .onReceive(timer) { _ in
+            updateDuration()
+        }
     }
-    
+
+    private func updateDuration() {
+        let duration = Date().timeIntervalSince(record.clockInTime)
+        let hours = Int(duration) / 3600
+        let minutes = (Int(duration) % 3600) / 60
+
+        if hours > 0 {
+            currentDuration = "\(hours)h \(minutes)m"
+        } else {
+            currentDuration = "\(minutes)m"
+        }
+    }
+
     private func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
