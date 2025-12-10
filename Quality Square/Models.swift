@@ -125,6 +125,56 @@ enum JobStatus: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - License Plate / Vehicle
+struct LicensePlate: Identifiable, Codable {
+    @DocumentID var id: String?
+    var plateNum: String
+    var currentDriverId: String?
+    var currentDriverName: String?
+    var currentTeamId: String?
+    var currentTeamName: String?
+    var assignedAt: Date?
+    var available: Bool
+    var currentTeamMembers: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case plateNum
+        case currentDriverId
+        case currentDriverName
+        case currentTeamId
+        case currentTeamName
+        case assignedAt
+        case available
+        case currentTeamMembers
+    }
+
+    init(id: String? = nil, plateNum: String, currentDriverId: String? = nil, currentDriverName: String? = nil, currentTeamId: String? = nil, currentTeamName: String? = nil, assignedAt: Date? = nil, available: Bool = true) {
+        self._id = DocumentID(wrappedValue: id)
+        self.plateNum = plateNum
+        self.currentDriverId = currentDriverId
+        self.currentDriverName = currentDriverName
+        self.currentTeamId = currentTeamId
+        self.currentTeamName = currentTeamName
+        self.assignedAt = assignedAt
+        self.available = available
+        self.currentTeamMembers = nil
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self._id = try container.decodeIfPresent(DocumentID<String>.self, forKey: .id) ?? DocumentID(wrappedValue: nil)
+        self.plateNum = try container.decode(String.self, forKey: .plateNum)
+        self.currentDriverId = try container.decodeIfPresent(String.self, forKey: .currentDriverId)
+        self.currentDriverName = try container.decodeIfPresent(String.self, forKey: .currentDriverName)
+        self.currentTeamId = try container.decodeIfPresent(String.self, forKey: .currentTeamId)
+        self.currentTeamName = try container.decodeIfPresent(String.self, forKey: .currentTeamName)
+        self.assignedAt = try container.decodeIfPresent(Date.self, forKey: .assignedAt)
+        self.available = try container.decodeIfPresent(Bool.self, forKey: .available) ?? true
+        self.currentTeamMembers = try container.decodeIfPresent([String].self, forKey: .currentTeamMembers)
+    }
+}
+
 // MARK: - Job Type Enum
 enum JobType: String, Codable, CaseIterable {
     case bestBuyTV = "Best Buy TV Install"

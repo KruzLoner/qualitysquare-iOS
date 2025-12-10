@@ -494,6 +494,30 @@ class FirestoreManager: ObservableObject {
             }
     }
 
+    func fetchTeamsForEmployee(employeeId: String, completion: @escaping ([(id: String, name: String, members: [String])]) -> Void) {
+        db.collection("teams")
+            .getDocuments { snapshot, _ in
+                guard let documents = snapshot?.documents else {
+                    completion([])
+                    return
+                }
+
+                let teams = documents.compactMap { doc -> (String, String, [String])? in
+                    let members = doc.data()["members"] as? [[String: Any]] ?? []
+                    let isMember = members.contains { member in
+                        (member["employeeId"] as? String) == employeeId
+                    }
+                    if isMember {
+                        let name = doc.data()["name"] as? String ?? "Team"
+                        let memberNames: [String] = members.compactMap { $0["employeeName"] as? String }
+                        return (doc.documentID, name, memberNames)
+                    }
+                    return nil
+                }
+                completion(teams)
+            }
+    }
+
     // Decode flexible job schema (supports team assignments)
     private func decodeJob(for employeeId: String, teamIds: Set<String>, document: QueryDocumentSnapshot) -> Job? {
         let data = document.data()
@@ -659,6 +683,106 @@ class FirestoreManager: ObservableObject {
         case "rescheduled": return .rescheduled
         case "in_progress", "picking_up", "delivering", "started": return .inProgress
         default: return .scheduled
+        }
+    }
+
+    // MARK: - Vehicles / License Plates
+    func getLicensePlates(completion: @escaping (Result<[LicensePlate], Error>) -> Void) {
+        db.collection("LicensePlate")
+            .order(by: "plateNum")
+            .getDocuments { snapshot, error in
+                if let error = error {
+                    completion(.failure(error))
+                    return
+                }
+
+                guard let documents = snapshot?.documents else {
+                    completion(.success([]))
+                    return
+                }
+
+                let plates = documents.compactMap { doc -> LicensePlate? in
+                    try? doc.data(as: LicensePlate.self)
+                }
+                completion(.success(plates))
+            }
+    }
+
+    func createLicensePlate(plateNum: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        let data: [String: Any] = [
+            "plateNum": plateNum,
+            "available": true,
+            "createdAt": Timestamp(date: Date())
+        ]
+        db.collection("LicensePlate").addDocument(data: data) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+
+    func assignLicensePlate(plateId: String, driverId: String, driverName: String, teamId: String?, teamName: String?, teamMembers: [String]? = nil, completion: @escaping (Result<Void, Error>) -> Void) {
+        var data: [String: Any] = [
+            "currentDriverId": driverId,
+            "currentDriverName": driverName,
+            "assignedAt": Timestamp(date: Date()),
+            "available": false
+        ]
+        if let teamId = teamId {
+            data["currentTeamId"] = teamId
+            data["currentTeamName"] = teamName
+            data["currentTeamMembers"] = teamMembers
+        }
+
+        db.collection("LicensePlate").document(plateId).updateData(data) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+
+    func assignLicensePlate(plate: LicensePlate, driverId: String, driverName: String, teamId: String?, teamName: String?, teamMembers: [String]? = nil, completion: @escaping (Result<Void, Error>) -> Void) {
+        if let plateId = plate.id {
+            assignLicensePlate(plateId: plateId, driverId: driverId, driverName: driverName, teamId: teamId, teamName: teamName, teamMembers: teamMembers, completion: completion)
+            return
+        }
+
+        // Fallback: find by plate number
+        db.collection("LicensePlate")
+            .whereField("plateNum", isEqualTo: plate.plateNum)
+            .limit(to: 1)
+            .getDocuments { snapshot, error in
+                if let error = error {
+                    completion(.failure(error))
+                    return
+                }
+                guard let doc = snapshot?.documents.first else {
+                    completion(.failure(NSError(domain: "FirestoreManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "Vehicle not found"])))
+                    return
+                }
+                let plateId = doc.documentID
+                self.assignLicensePlate(plateId: plateId, driverId: driverId, driverName: driverName, teamId: teamId, teamName: teamName, completion: completion)
+            }
+    }
+
+    func clearLicensePlateAssignment(plateId: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        db.collection("LicensePlate").document(plateId).updateData([
+            "currentDriverId": FieldValue.delete(),
+            "currentDriverName": FieldValue.delete(),
+            "currentTeamId": FieldValue.delete(),
+            "currentTeamName": FieldValue.delete(),
+            "assignedAt": FieldValue.delete(),
+            "available": true
+        ]) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
         }
     }
 }

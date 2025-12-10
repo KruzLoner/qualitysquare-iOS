@@ -67,11 +67,11 @@ struct LoginView: View {
                     
                     // Content Area
                     TabView(selection: $selectedTab) {
-                        AdminLoginView()
-                            .tag(0)
-                        
                         EmployeeLoginView()
                             .tag(1)
+
+                        AdminLoginView()
+                            .tag(0)
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
                 }
@@ -271,7 +271,7 @@ struct EmployeeLoginView: View {
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 18) {
                 // Header
                 VStack(spacing: 8) {
                     Text("Employee Login")
@@ -282,8 +282,8 @@ struct EmployeeLoginView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                .padding(.top, 32)
-                .padding(.bottom, 8)
+                .padding(.top, 20)
+                .padding(.bottom, 4)
                 
                 // PIN Display
                 VStack(spacing: 20) {
@@ -295,7 +295,7 @@ struct EmployeeLoginView: View {
                             )
                         }
                     }
-                    .padding(.vertical, 16)
+                    .padding(.vertical, 10)
                     
                     // Hidden TextField for PIN input
                     TextField("", text: $pin)
@@ -339,9 +339,9 @@ struct EmployeeLoginView: View {
                 }
                 
                 // Number Pad
-                VStack(spacing: 12) {
+                VStack(spacing: 8) {
                     ForEach(0..<3) { row in
-                        HStack(spacing: 12) {
+                        HStack(spacing: 8) {
                             ForEach(1..<4) { col in
                                 let number = row * 3 + col
                                 NumberButton(number: "\(number)") {
@@ -353,17 +353,8 @@ struct EmployeeLoginView: View {
                         }
                     }
                     
-                    // Last row with 0 and delete
-                    HStack(spacing: 12) {
-                        Color.clear
-                            .frame(width: 70, height: 70)
-                        
-                        NumberButton(number: "0") {
-                            if pin.count < 6 {
-                                pin += "0"
-                            }
-                        }
-                        
+                    // Last row with delete, 0, enter
+                    HStack(spacing: 8) {
                         Button(action: {
                             if !pin.isEmpty {
                                 pin.removeLast()
@@ -372,7 +363,27 @@ struct EmployeeLoginView: View {
                             Image(systemName: "delete.left.fill")
                                 .font(.title3)
                                 .fontWeight(.medium)
-                                .frame(width: 70, height: 70)
+                                .frame(width: 60, height: 60)
+                                .background(
+                                    Circle()
+                                        .fill(.thinMaterial)
+                                )
+                                .foregroundColor(.primary)
+                        }
+                        
+                        NumberButton(number: "0") {
+                            if pin.count < 6 {
+                                pin += "0"
+                            }
+                        }
+                        
+                        Button(action: {
+                            loginEmployee()
+                        }) {
+                            Text("Enter")
+                                .font(.title3)
+                                .fontWeight(.medium)
+                                .frame(width: 60, height: 60)
                                 .background(
                                     Circle()
                                         .fill(.thinMaterial)
@@ -381,12 +392,12 @@ struct EmployeeLoginView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-                
-                Spacer()
-                    .frame(height: 40)
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+                .padding(.bottom, 4)
             }
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .onAppear {
             isPinFocused = true
@@ -453,7 +464,7 @@ struct NumberButton: View {
             Text(number)
                 .font(.title2)
                 .fontWeight(.medium)
-                .frame(width: 70, height: 70)
+                .frame(width: 60, height: 60)
                 .background(
                     Circle()
                         .fill(.thinMaterial)
@@ -482,4 +493,3 @@ struct NumberButton: View {
     LoginView()
         .environmentObject(AuthenticationManager())
 }
-

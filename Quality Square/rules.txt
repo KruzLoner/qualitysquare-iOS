@@ -45,5 +45,11 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true; // Allow both admins and employees to access teams
     }
+
+    // Vehicles / License Plates
+    match /LicensePlate/{plateId} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }

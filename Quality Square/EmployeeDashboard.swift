@@ -19,6 +19,13 @@ struct EmployeeDashboard: View {
     @State private var showingLogoutConfirm = false
     @State private var elapsedTime: TimeInterval = 0
     @State private var timerCancellable: AnyCancellable?
+    @State private var showingVehiclePicker = false
+    @State private var selectedPlate: LicensePlate?
+    @State private var licensePlates: [LicensePlate] = []
+    @State private var employeeTeamId: String?
+    @State private var employeeTeamName: String?
+    @State private var employeeTeamMembers: [String] = []
+    @State private var vehicleError: String?
     
     var isClockedIn: Bool {
         clockRecord?.isClocked ?? false
@@ -102,6 +109,53 @@ struct EmployeeDashboard: View {
                         }
                         .disabled(isLoading)
                         .padding(.horizontal, 20)
+
+                        // Vehicle chip
+                        if let plate = selectedPlate {
+                            HStack {
+                                Label(plate.plateNum, systemImage: "car.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                HStack(spacing: 10) {
+                                    Button("Change") { showingVehiclePicker = true }
+                                        .font(.caption.bold())
+                                    Button("Release") { releaseVehicle() }
+                                        .font(.caption.bold())
+                                        .foregroundColor(.red)
+                                }
+                            }
+                            .padding(14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(.ultraThinMaterial)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                    )
+                            )
+                            .padding(.horizontal, 20)
+                        } else {
+                            Button {
+                                showingVehiclePicker = true
+                            } label: {
+                                Label("Select Vehicle", systemImage: "car.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(14)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(.ultraThinMaterial)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 16)
+                                                    .stroke(Color.primary.opacity(0.2), lineWidth: 1)
+                                            )
+                                    )
+                            }
+                            .padding(.horizontal, 20)
+                            
+                            // No extra warnings here; selection is mandatory before clock-in
+                        }
                         
                         // Error Message
                         if let error = errorMessage {
@@ -177,16 +231,26 @@ struct EmployeeDashboard: View {
                 Task {
                     await loadData()
                 }
-            }
-            .onDisappear {
+        }
+        .onDisappear {
+            stopElapsedTimer()
+        }
+        .sheet(isPresented: $showingVehiclePicker) {
+            VehiclePickerSheet(
+                plates: licensePlates,
+                teamId: employeeTeamId,
+                currentUserId: authManager.currentUser?.id,
+                onSelect: { plate in
+                    selectedPlate = plate
+                }
+            )
+        }
+        .alert("Logout", isPresented: $showingLogoutConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Logout", role: .destructive) {
+                authManager.logout()
                 stopElapsedTimer()
             }
-            .alert("Logout", isPresented: $showingLogoutConfirm) {
-                Button("Cancel", role: .cancel) { }
-                Button("Logout", role: .destructive) {
-                    authManager.logout()
-                    stopElapsedTimer()
-                }
             } message: {
                 Text("Are you sure you want to logout?")
             }
@@ -215,16 +279,39 @@ struct EmployeeDashboard: View {
                 }
             }
         } else {
+            // Require vehicle selection before clock in
+            guard let plate = selectedPlate else {
+                isLoading = false
+                showingVehiclePicker = true
+                errorMessage = "Select a vehicle before clocking in."
+                return
+            }
+
             // Clock In
             firestoreManager.clockIn(employeeId: employeeId, employeeName: employeeName) { result in
                 DispatchQueue.main.async {
-                    isLoading = false
                     switch result {
                     case .success(let record):
+                        // assign vehicle if we have a valid plate id
+                        firestoreManager.assignLicensePlate(
+                            plate: plate,
+                            driverId: employeeId,
+                            driverName: employeeName,
+                            teamId: employeeTeamId,
+                            teamName: employeeTeamName,
+                            teamMembers: employeeTeamMembers
+                        ) { assignResult in
+                            if case .failure(let error) = assignResult {
+                                errorMessage = "Vehicle assignment failed: \(error.localizedDescription)"
+                            }
+                        }
+
+                        isLoading = false
                         clockRecord = record
                         startElapsedTimer(from: record.clockInTime)
                         Task { await loadData() }
                     case .failure(let error):
+                        isLoading = false
                         errorMessage = error.localizedDescription
                     }
                 }
@@ -234,6 +321,15 @@ struct EmployeeDashboard: View {
     
     private func loadData() async {
         guard let employeeId = authManager.currentUser?.id else { return }
+        
+        firestoreManager.fetchTeamsForEmployee(employeeId: employeeId) { teams in
+            DispatchQueue.main.async {
+                employeeTeamId = teams.first?.id
+                employeeTeamName = teams.first?.name
+                employeeTeamMembers = teams.first?.members ?? []
+                preselectPlate(from: licensePlates)
+            }
+        }
         
         // Load clock status
         firestoreManager.getTodayClockStatus(employeeId: employeeId) { result in
@@ -257,8 +353,22 @@ struct EmployeeDashboard: View {
                 }
             }
         }
+        
+        firestoreManager.getLicensePlates { result in
+            DispatchQueue.main.async {
+                if case .success(let plates) = result {
+                    let unique = Dictionary(grouping: plates, by: { $0.id ?? $0.plateNum })
+                        .compactMap { $0.value.first }
+                        .sorted { $0.plateNum < $1.plateNum }
+                    licensePlates = unique
+                    preselectPlate(from: unique)
+                } else if case .failure(let error) = result {
+                    vehicleError = "Failed to load vehicles: \(error.localizedDescription)"
+                }
+            }
+        }
     }
-    
+
     private var elapsedDisplay: String {
         formatDuration(elapsedTime)
     }
@@ -291,6 +401,83 @@ struct EmployeeDashboard: View {
         timerCancellable?.cancel()
         timerCancellable = nil
         elapsedTime = 0
+    }
+
+    private func releaseVehicle() {
+        guard let plateId = selectedPlate?.id else { return }
+        firestoreManager.clearLicensePlateAssignment(plateId: plateId) { _ in }
+        selectedPlate = nil
+        Task { await loadData() }
+    }
+
+    private func preselectPlate(from plates: [LicensePlate]) {
+        guard let userId = authManager.currentUser?.id else { return }
+        if let match = plates.first(where: { plate in
+            plate.currentDriverId == userId || (employeeTeamId != nil && plate.currentTeamId == employeeTeamId)
+        }) {
+            selectedPlate = match
+        }
+    }
+}
+
+// MARK: - Vehicle Picker
+private struct VehiclePickerSheet: View {
+    let plates: [LicensePlate]
+    let teamId: String?
+    let currentUserId: String?
+    let onSelect: (LicensePlate) -> Void
+
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationView {
+            List {
+                if plates.isEmpty {
+                    Text("No vehicles available. Ask an admin to add plates.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(plates, id: \.plateNum) { plate in
+                        let isHeldBySelf = plate.currentDriverId == currentUserId || (teamId != nil && plate.currentTeamId == teamId)
+                        let isAvailable = plate.available || isHeldBySelf
+                        let isTakenByOtherTeam = !isAvailable && !isHeldBySelf
+                        Button {
+                            guard !isTakenByOtherTeam else { return }
+                            onSelect(plate)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(plate.plateNum)
+                                        .font(.headline)
+                                    if isHeldBySelf {
+                                        Text("Assigned to you/team")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Capsule()
+                                    .fill((plate.available || isHeldBySelf) ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+                                    .frame(width: 90, height: 28)
+                                    .overlay(
+                                        Text((plate.available || isHeldBySelf) ? "Available" : "Unavailable")
+                                            .font(.caption)
+                                            .foregroundColor((plate.available || isHeldBySelf) ? .green : .red)
+                                    )
+                            }
+                        }
+                        .disabled(isTakenByOtherTeam)
+                    }
+                }
+            }
+            .navigationTitle("Select Vehicle")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
     }
 }
 

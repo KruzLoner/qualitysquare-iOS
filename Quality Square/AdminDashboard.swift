@@ -15,6 +15,10 @@ struct AdminDashboard: View {
     @State private var todayJobs: [Job] = []
     @State private var allEmployees: [Employee] = []
     @State private var teams: [Team] = []
+    @State private var licensePlates: [LicensePlate] = []
+    @State private var newPlateNum: String = ""
+    @State private var vehicleFormError: String?
+    @State private var vehicleSubmitting = false
     @State private var isLoading = false
     @State private var showingLogoutConfirm = false
     @State private var selectedTab = 0
@@ -68,7 +72,7 @@ struct AdminDashboard: View {
     }
 
     private var jobFilters: [JobStatus] {
-        [.inProgress, .rescheduled, .cancelled, .completed]
+        [.rescheduled, .cancelled, .completed]
     }
 
 
@@ -120,6 +124,7 @@ struct AdminDashboard: View {
                         Text("Jobs").tag(1)
                         Text("Teams").tag(2)
                         Text("Employees").tag(3)
+                        Text("Vehicles").tag(4)
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal, 20)
@@ -216,13 +221,10 @@ struct AdminDashboard: View {
                                         }
                                         .padding(.horizontal, 20)
 
-                                        ScrollView(.horizontal, showsIndicators: false) {
-                                            HStack(spacing: 10) {
+                                        VStack(spacing: 8) {
+                                            HStack(spacing: 12) {
                                                 FilterChip(title: "All", count: todayJobs.count, isSelected: selectedJobFilter == nil) {
                                                     selectedJobFilter = nil
-                                                }
-                                                FilterChip(title: "Active", count: activeJobs.count, isSelected: selectedJobFilter == .inProgress) {
-                                                    selectedJobFilter = .inProgress
                                                 }
                                                 FilterChip(title: "Rescheduled", count: rescheduledJobs.count, isSelected: selectedJobFilter == .rescheduled) {
                                                     selectedJobFilter = .rescheduled
@@ -234,14 +236,18 @@ struct AdminDashboard: View {
                                                     selectedJobFilter = .completed
                                                 }
                                             }
+                                            .frame(maxWidth: .infinity)
                                             .padding(.horizontal, 20)
-                                            .padding(.vertical, 4)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 14)
+                                                    .fill(.ultraThinMaterial)
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 14)
+                                                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                                    )
+                                            )
                                         }
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 14)
-                                                .fill(.ultraThinMaterial)
-                                                .padding(.horizontal, 12)
-                                        )
                                         .padding(.top, -4)
                                     }
 
@@ -390,6 +396,79 @@ struct AdminDashboard: View {
                             }
                         }
                         .tag(3)
+
+                        // Vehicles Tab
+                        ScrollView {
+                            VStack(spacing: 16) {
+                                HStack {
+                                    Text("Vehicles")
+                                        .font(.headline)
+                                    Spacer()
+                                    Text("\(licensePlates.count) total")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.horizontal, 20)
+
+                                VStack(spacing: 12) {
+                                    TextField("License plate number", text: $newPlateNum)
+                                        .autocapitalization(.allCharacters)
+                                        .textInputAutocapitalization(.characters)
+                                        .padding()
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(.thinMaterial)
+                                        )
+                                        .padding(.horizontal, 20)
+
+                                    if let vehicleFormError = vehicleFormError {
+                                        Text(vehicleFormError)
+                                            .font(.caption)
+                                            .foregroundColor(.red)
+                                            .padding(.horizontal, 20)
+                                    }
+
+                                    Button(action: addVehicle) {
+                                        HStack {
+                                            if vehicleSubmitting {
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            }
+                                            Text("Add Vehicle")
+                                                .fontWeight(.semibold)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 14)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Color.blue.opacity(newPlateNum.isEmpty ? 0.3 : 0.9))
+                                        )
+                                        .foregroundColor(.white)
+                                    }
+                                    .disabled(newPlateNum.isEmpty || vehicleSubmitting)
+                                    .padding(.horizontal, 20)
+                                }
+                                .padding(.vertical, 8)
+
+                                if licensePlates.isEmpty {
+                                    EmptyStateView(
+                                        icon: "car",
+                                        message: "No vehicles found"
+                                    )
+                                } else {
+                                    ForEach(licensePlates, id: \.plateNum) { plate in
+                                        VehicleCard(
+                                            plate: plate,
+                                            teamMembers: teamMembers(for: plate)
+                                        )
+                                    }
+                                }
+
+                                Spacer()
+                                    .frame(height: 40)
+                            }
+                        }
+                        .tag(4)
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
                 }
@@ -478,6 +557,55 @@ struct AdminDashboard: View {
                 }
             }
         }
+
+        // Load vehicles
+        firestoreManager.getLicensePlates { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let plates):
+                    let unique = Dictionary(grouping: plates, by: { $0.id ?? $0.plateNum })
+                        .compactMap { $0.value.first }
+                        .sorted { $0.plateNum < $1.plateNum }
+                    licensePlates = unique
+                    print("✅ [AdminDashboard] Loaded \(plates.count) license plate(s)")
+                case .failure(let error):
+                    print("❌ [AdminDashboard] Error loading license plates: \(error.localizedDescription)")
+                    vehicleFormError = "Failed to load vehicles"
+                }
+            }
+        }
+    }
+
+    private func addVehicle() {
+        let trimmed = newPlateNum.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            vehicleFormError = "Plate number is required"
+            return
+        }
+
+        vehicleFormError = nil
+        vehicleSubmitting = true
+
+        firestoreManager.createLicensePlate(plateNum: trimmed.uppercased()) { result in
+            DispatchQueue.main.async {
+                vehicleSubmitting = false
+                switch result {
+                case .success:
+                    newPlateNum = ""
+                    Task { await loadData() }
+                case .failure(let error):
+                    vehicleFormError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func teamMembers(for plate: LicensePlate) -> [String]? {
+        guard let teamId = plate.currentTeamId else { return plate.currentTeamMembers }
+        if let team = teams.first(where: { $0.id == teamId }) {
+            return team.members.map { $0.employeeName }
+        }
+        return plate.currentTeamMembers
     }
 }
 
@@ -550,6 +678,73 @@ private struct CompactJobStats: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
         )
+    }
+}
+
+// MARK: - Vehicle Card
+private struct VehicleCard: View {
+    let plate: LicensePlate
+    let teamMembers: [String]?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(plate.plateNum, systemImage: "car.fill")
+                    .font(.headline)
+                Spacer()
+                if let assignedAt = plate.assignedAt {
+                    Text(timeAgo(from: assignedAt))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if let driver = plate.currentDriverName {
+                Label(driver, systemImage: "person.fill")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Text(plate.available ? "Available" : "Unavailable")
+                    .font(.caption)
+                    .foregroundColor(plate.available ? .green : .red)
+            }
+
+            if let team = plate.currentTeamName {
+                Label(team, systemImage: "person.3.fill")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            let membersToShow = teamMembers ?? plate.currentTeamMembers
+            if let members = membersToShow, !members.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Members")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(members.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .padding(.horizontal, 20)
+    }
+
+    private func timeAgo(from date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
