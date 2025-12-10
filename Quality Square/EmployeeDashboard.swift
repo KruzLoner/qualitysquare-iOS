@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 struct EmployeeDashboard: View {
     @EnvironmentObject var authManager: AuthenticationManager
@@ -16,6 +17,8 @@ struct EmployeeDashboard: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showingLogoutConfirm = false
+    @State private var elapsedTime: TimeInterval = 0
+    @State private var timerCancellable: AnyCancellable?
     
     var isClockedIn: Bool {
         clockRecord?.isClocked ?? false
@@ -60,10 +63,10 @@ struct EmployeeDashboard: View {
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                                 
-                                if let record = clockRecord, record.isClocked {
+                                if isClockedIn {
                                     Text("•")
                                         .foregroundColor(.secondary)
-                                    Text(formatTime(record.clockInTime))
+                                    Text(elapsedDisplay)
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
                                 }
@@ -175,10 +178,14 @@ struct EmployeeDashboard: View {
                     await loadData()
                 }
             }
+            .onDisappear {
+                stopElapsedTimer()
+            }
             .alert("Logout", isPresented: $showingLogoutConfirm) {
                 Button("Cancel", role: .cancel) { }
                 Button("Logout", role: .destructive) {
                     authManager.logout()
+                    stopElapsedTimer()
                 }
             } message: {
                 Text("Are you sure you want to logout?")
@@ -200,6 +207,7 @@ struct EmployeeDashboard: View {
                     isLoading = false
                     switch result {
                     case .success:
+                        stopElapsedTimer()
                         Task { await loadData() }
                     case .failure(let error):
                         errorMessage = error.localizedDescription
@@ -214,6 +222,7 @@ struct EmployeeDashboard: View {
                     switch result {
                     case .success(let record):
                         clockRecord = record
+                        startElapsedTimer(from: record.clockInTime)
                         Task { await loadData() }
                     case .failure(let error):
                         errorMessage = error.localizedDescription
@@ -231,6 +240,11 @@ struct EmployeeDashboard: View {
             DispatchQueue.main.async {
                 if case .success(let record) = result {
                     clockRecord = record
+                    if let clockIn = record?.clockInTime, record?.isClocked == true {
+                        startElapsedTimer(from: clockIn)
+                    } else {
+                        stopElapsedTimer()
+                    }
                 }
             }
         }
@@ -245,10 +259,38 @@ struct EmployeeDashboard: View {
         }
     }
     
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+    private var elapsedDisplay: String {
+        formatDuration(elapsedTime)
+    }
+    
+    private func formatDuration(_ interval: TimeInterval) -> String {
+        let totalSeconds = Int(interval)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        
+        if hours > 0 {
+            return String(format: "%02dh %02dm %02ds", hours, minutes, seconds)
+        } else {
+            return String(format: "%02dm %02ds", minutes, seconds)
+        }
+    }
+    
+    private func startElapsedTimer(from startDate: Date) {
+        timerCancellable?.cancel()
+        elapsedTime = Date().timeIntervalSince(startDate)
+        
+        timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
+            .autoconnect()
+            .sink { now in
+                elapsedTime = now.timeIntervalSince(startDate)
+            }
+    }
+    
+    private func stopElapsedTimer() {
+        timerCancellable?.cancel()
+        timerCancellable = nil
+        elapsedTime = 0
     }
 }
 
@@ -310,7 +352,7 @@ struct JobStatusBadge: View {
     let status: JobStatus
     
     var body: some View {
-        Text(status.rawValue)
+        Text(status.displayName)
             .font(.caption)
             .fontWeight(.medium)
             .padding(.horizontal, 10)
@@ -325,8 +367,8 @@ struct JobStatusBadge: View {
     private var statusColor: Color {
         switch status {
         case .scheduled: return .blue
-        case .inProgress: return .orange
-        case .completed: return .green
+        case .inProgress, .pickingUp, .pickUp, .enRoute: return .orange
+        case .completed, .complete: return .green
         case .rescheduled: return .purple
         case .cancelled: return .red
         }
@@ -337,4 +379,3 @@ struct JobStatusBadge: View {
     EmployeeDashboard()
         .environmentObject(AuthenticationManager())
 }
-

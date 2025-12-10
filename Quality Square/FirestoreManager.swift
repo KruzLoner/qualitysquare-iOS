@@ -18,67 +18,73 @@ class FirestoreManager: ObservableObject {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateString = dateFormatter.string(from: Date())
-        
-        // Check if already clocked in today
-        db.collection("clockRecords")
+
+        // Prevent duplicate active entries
+        db.collection("timeEntries")
             .whereField("employeeId", isEqualTo: employeeId)
-            .whereField("date", isEqualTo: dateString)
-            .whereField("clockOutTime", isEqualTo: NSNull())
+            .whereField("clockOut", isEqualTo: NSNull())
             .getDocuments { [weak self] snapshot, error in
                 if let error = error {
                     completion(.failure(error))
                     return
                 }
-                
+
                 if let documents = snapshot?.documents, !documents.isEmpty {
                     completion(.failure(NSError(domain: "FirestoreManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Already clocked in"])))
                     return
                 }
-                
-                // Create new clock record
-                let clockRecord = ClockRecord(
-                    employeeId: employeeId,
-                    employeeName: employeeName,
-                    clockInTime: Date(),
-                    clockOutTime: nil,
-                    date: dateString
-                )
-                
-                do {
-                    let ref = try self?.db.collection("clockRecords").addDocument(from: clockRecord)
-                    var recordWithId = clockRecord
-                    recordWithId.id = ref?.documentID
-                    completion(.success(recordWithId))
-                } catch {
-                    completion(.failure(error))
+
+                let now = Date()
+                let entryData: [String: Any] = [
+                    "employeeId": employeeId,
+                    "clockIn": Timestamp(date: now),
+                    "clockOut": NSNull(),
+                    "duration": NSNull(),
+                    "payPeriodId": "unassigned"
+                ]
+
+                self?.db.collection("timeEntries").addDocument(data: entryData) { error in
+                    if let error = error {
+                        completion(.failure(error))
+                        return
+                    }
+
+                    let record = ClockRecord(
+                        employeeId: employeeId,
+                        employeeName: employeeName,
+                        clockInTime: now,
+                        clockOutTime: nil,
+                        date: dateString
+                    )
+                    completion(.success(record))
                 }
             }
     }
     
     func clockOut(employeeId: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dateString = dateFormatter.string(from: Date())
-        
-        // Find today's active clock record
-        db.collection("clockRecords")
+        // Find active time entry
+        db.collection("timeEntries")
             .whereField("employeeId", isEqualTo: employeeId)
-            .whereField("date", isEqualTo: dateString)
-            .whereField("clockOutTime", isEqualTo: NSNull())
+            .whereField("clockOut", isEqualTo: NSNull())
+            .limit(to: 1)
             .getDocuments { [weak self] snapshot, error in
                 if let error = error {
                     completion(.failure(error))
                     return
                 }
                 
-                guard let documents = snapshot?.documents, !documents.isEmpty else {
+                guard let document = snapshot?.documents.first else {
                     completion(.failure(NSError(domain: "FirestoreManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "No active clock in found"])))
                     return
                 }
                 
-                let documentId = documents[0].documentID
-                self?.db.collection("clockRecords").document(documentId).updateData([
-                    "clockOutTime": Timestamp(date: Date())
+                let now = Date()
+                let clockInDate = (document.data()["clockIn"] as? Timestamp)?.dateValue() ?? now
+                let durationHours = now.timeIntervalSince(clockInDate) / 3600
+                
+                self?.db.collection("timeEntries").document(document.documentID).updateData([
+                    "clockOut": Timestamp(date: now),
+                    "duration": durationHours
                 ]) { error in
                     if let error = error {
                         completion(.failure(error))
@@ -94,10 +100,9 @@ class FirestoreManager: ObservableObject {
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateString = dateFormatter.string(from: Date())
         
-        db.collection("clockRecords")
+        db.collection("timeEntries")
             .whereField("employeeId", isEqualTo: employeeId)
-            .whereField("date", isEqualTo: dateString)
-            .order(by: "clockInTime", descending: true)
+            .whereField("clockOut", isEqualTo: NSNull())
             .limit(to: 1)
             .getDocuments { snapshot, error in
                 if let error = error {
@@ -105,13 +110,21 @@ class FirestoreManager: ObservableObject {
                     return
                 }
                 
-                guard let documents = snapshot?.documents, !documents.isEmpty else {
+                guard let document = snapshot?.documents.first else {
                     completion(.success(nil))
                     return
                 }
                 
                 do {
-                    let clockRecord = try documents[0].data(as: ClockRecord.self)
+                    let timeEntry = try document.data(as: TimeEntry.self)
+                    let clockRecord = ClockRecord(
+                        id: timeEntry.id,
+                        employeeId: timeEntry.employeeId,
+                        employeeName: "",
+                        clockInTime: timeEntry.clockIn,
+                        clockOutTime: timeEntry.clockOut,
+                        date: dateString
+                    )
                     completion(.success(clockRecord))
                 } catch {
                     completion(.failure(error))
@@ -126,28 +139,57 @@ class FirestoreManager: ObservableObject {
         let startOfDay = calendar.startOfDay(for: Date())
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
         
-        db.collection("jobs")
-            .whereField("assignedEmployeeId", isEqualTo: employeeId)
-            .whereField("scheduledDate", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
-            .whereField("scheduledDate", isLessThan: Timestamp(date: endOfDay))
-            .order(by: "scheduledDate")
-            .getDocuments { snapshot, error in
-                if let error = error {
-                    completion(.failure(error))
-                    return
+        fetchTeamIds(for: employeeId) { teamIds in
+            // Fetch a reasonable batch and filter on the client to avoid index issues and include team jobs
+            self.db.collection("jobs")
+                .limit(to: 300)
+                .getDocuments { snapshot, error in
+                    if let error = error {
+                        completion(.failure(error))
+                        return
+                    }
+
+                    guard let documents = snapshot?.documents else {
+                        completion(.success([]))
+                        return
+                    }
+
+                    let jobs = documents.compactMap { doc -> Job? in
+                        self.decodeJob(for: employeeId, teamIds: teamIds, document: doc)
+                    }
+                    .filter { job in
+                        job.scheduledDate >= startOfDay && job.scheduledDate < endOfDay
+                    }
+                    .sorted { $0.scheduledDate < $1.scheduledDate }
+
+                    completion(.success(jobs))
                 }
-                
-                guard let documents = snapshot?.documents else {
-                    completion(.success([]))
-                    return
+        }
+    }
+
+    func getJobHistoryForEmployee(employeeId: String, completion: @escaping (Result<[Job], Error>) -> Void) {
+        fetchTeamIds(for: employeeId) { teamIds in
+            self.db.collection("jobs")
+                .limit(to: 500)
+                .getDocuments { snapshot, error in
+                    if let error = error {
+                        completion(.failure(error))
+                        return
+                    }
+
+                    guard let documents = snapshot?.documents else {
+                        completion(.success([]))
+                        return
+                    }
+
+                    let jobs = documents.compactMap { doc -> Job? in
+                        self.decodeJob(for: employeeId, teamIds: teamIds, document: doc)
+                    }
+                    .sorted { $0.scheduledDate > $1.scheduledDate }
+
+                    completion(.success(jobs))
                 }
-                
-                let jobs = documents.compactMap { doc -> Job? in
-                    try? doc.data(as: Job.self)
-                }
-                
-                completion(.success(jobs))
-            }
+        }
     }
     
     func getAllJobsForToday(completion: @escaping (Result<[Job], Error>) -> Void) {
@@ -156,9 +198,7 @@ class FirestoreManager: ObservableObject {
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
         
         db.collection("jobs")
-            .whereField("scheduledDate", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
-            .whereField("scheduledDate", isLessThan: Timestamp(date: endOfDay))
-            .order(by: "scheduledDate")
+            .limit(to: 500)
             .getDocuments { snapshot, error in
                 if let error = error {
                     completion(.failure(error))
@@ -171,8 +211,12 @@ class FirestoreManager: ObservableObject {
                 }
                 
                 let jobs = documents.compactMap { doc -> Job? in
-                    try? doc.data(as: Job.self)
+                    self.decodeJobForAdmin(document: doc)
                 }
+                .filter { job in
+                    job.scheduledDate >= startOfDay && job.scheduledDate < endOfDay
+                }
+                .sorted { $0.scheduledDate < $1.scheduledDate }
                 
                 completion(.success(jobs))
             }
@@ -228,12 +272,11 @@ class FirestoreManager: ObservableObject {
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateString = dateFormatter.string(from: Date())
 
-        print("🔍 [FirestoreManager] Fetching ALL currently clocked-in employees (no date filter)")
+        print("🔍 [FirestoreManager] Fetching all currently clocked-in employees (no date filter)")
 
-        // Query ALL timeEntries - we'll filter for clockOut = null
+        // Query timeEntries where clockOut is null (all active clock-ins)
         db.collection("timeEntries")
-            .order(by: "clockIn", descending: true)
-            .limit(to: 100)
+            .whereField("clockOut", isEqualTo: NSNull())
             .getDocuments { [weak self] snapshot, error in
                 if let error = error {
                     print("❌ [FirestoreManager] Error fetching time entries: \(error.localizedDescription)")
@@ -247,15 +290,7 @@ class FirestoreManager: ObservableObject {
                     return
                 }
 
-                print("📄 [FirestoreManager] Retrieved \(documents.count) time entry document(s)")
-
-                // Debug: print all entries
-                for (index, doc) in documents.enumerated() {
-                    let data = doc.data()
-                    let clockOut = data["clockOut"]
-                    let clockIn = data["clockIn"]
-                    print("   Entry \(index + 1): employeeId=\(data["employeeId"] ?? "nil"), clockIn=\(clockIn ?? "nil"), clockOut=\(clockOut != nil ? "HAS VALUE" : "NULL")")
-                }
+                print("📄 [FirestoreManager] Retrieved \(documents.count) time entry document(s) for today")
 
                 // Fetch employee data to get names
                 self?.db.collection("employees").getDocuments { employeeSnapshot, employeeError in
@@ -263,26 +298,10 @@ class FirestoreManager: ObservableObject {
                         result[doc.documentID] = doc.data()["name"] as? String
                     } ?? [:]
 
-                    print("📋 [FirestoreManager] Employee map: \(employeeMap)")
+                    print("📋 [FirestoreManager] Employee map has \(employeeMap.count) employee(s)")
 
-                    var clockedInCount = 0
-                    var clockedOutCount = 0
-
-                    // Filter for only currently clocked in (clockOut is null) and convert to ClockRecord
-                    let records = documents.compactMap { doc -> ClockRecord? in
-                        let data = doc.data()
-
-                        // Check if clockOut exists in raw data
-                        let hasClockOut = data["clockOut"] != nil
-
-                        if hasClockOut {
-                            clockedOutCount += 1
-                            print("   ⏸️ Skipping - already clocked out: \(data["employeeId"] ?? "unknown")")
-                            return nil
-                        }
-
-                        clockedInCount += 1
-
+                    // Convert TimeEntry to ClockRecord
+                    var records = documents.compactMap { doc -> ClockRecord? in
                         do {
                             let timeEntry = try doc.data(as: TimeEntry.self)
 
@@ -293,7 +312,6 @@ class FirestoreManager: ObservableObject {
 
                             print("✅ Currently clocked in: \(employeeName) - since \(timeEntry.clockIn)")
 
-                            // Convert TimeEntry to ClockRecord
                             return ClockRecord(
                                 id: timeEntry.id,
                                 employeeId: timeEntry.employeeId,
@@ -308,7 +326,9 @@ class FirestoreManager: ObservableObject {
                         }
                     }
 
-                    print("📊 [FirestoreManager] Summary: \(clockedInCount) clocked in, \(clockedOutCount) clocked out")
+                    // Sort by clock in time (most recent first)
+                    records.sort { $0.clockInTime > $1.clockInTime }
+
                     print("✅ [FirestoreManager] Returning \(records.count) currently clocked-in employee(s)")
                     completion(.success(records))
                 }
@@ -450,5 +470,195 @@ class FirestoreManager: ObservableObject {
                 completion(.success(timeEntries))
             }
     }
-}
 
+    // MARK: - Helpers
+    private func fetchTeamIds(for employeeId: String, completion: @escaping (Set<String>) -> Void) {
+        db.collection("teams")
+            .getDocuments { snapshot, _ in
+                guard let documents = snapshot?.documents else {
+                    completion([])
+                    return
+                }
+
+                let teamIds: Set<String> = documents.reduce(into: Set<String>()) { result, doc in
+                    let members = doc.data()["members"] as? [[String: Any]] ?? []
+                    let isMember = members.contains { member in
+                        (member["employeeId"] as? String) == employeeId
+                    }
+                    if isMember {
+                        result.insert(doc.documentID)
+                    }
+                }
+
+                completion(teamIds)
+            }
+    }
+
+    // Decode flexible job schema (supports team assignments)
+    private func decodeJob(for employeeId: String, teamIds: Set<String>, document: QueryDocumentSnapshot) -> Job? {
+        let data = document.data()
+
+        let assignments = data["assignments"] as? [[String: Any]] ?? []
+        var matchesEmployee = false
+        var assignedEmployeeId: String?
+        var assignedEmployeeName: String?
+        var assignedTeamId: String?
+        var assignedTeamName: String?
+        var scheduledDate: Date?
+
+        for assignment in assignments {
+            let type = assignment["type"] as? String ?? ""
+            if type == "team-member", let eid = assignment["employeeId"] as? String, eid == employeeId {
+                matchesEmployee = true
+                assignedEmployeeId = eid
+                assignedEmployeeName = assignment["employeeName"] as? String
+                if let ts = assignment["date"] as? Timestamp {
+                    scheduledDate = ts.dateValue()
+                }
+            } else if type == "team", let tid = assignment["teamId"] as? String, teamIds.contains(tid) {
+                matchesEmployee = true
+                assignedTeamId = tid
+                assignedTeamName = assignment["teamName"] as? String
+                if let ts = assignment["date"] as? Timestamp {
+                    scheduledDate = ts.dateValue()
+                }
+            }
+        }
+
+        guard matchesEmployee else { return nil }
+
+        // Fallbacks for schedule
+        if scheduledDate == nil, let ts = data["installDate"] as? Timestamp {
+            scheduledDate = ts.dateValue()
+        }
+        if scheduledDate == nil, let ts = data["date"] as? Timestamp {
+            scheduledDate = ts.dateValue()
+        }
+        let scheduled = scheduledDate ?? Date()
+        let timeFormatter = DateFormatter()
+        timeFormatter.timeStyle = .short
+        let scheduledTime = timeFormatter.string(from: scheduled)
+
+        let clientName = (data["customerName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (data["jobNumber"] as? String).map { "Job \($0)" }
+            ?? "Job"
+        let clientAddress = (data["address"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (data["location"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? "Address not set"
+
+        let jobStatusRaw = data["status"] as? String ?? ""
+        let jobStatus = mapStatus(from: jobStatusRaw)
+
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+
+        return Job(
+            id: document.documentID,
+            clientName: clientName,
+            clientAddress: clientAddress,
+            clientPhone: data["phoneNumber"] as? String,
+            jobType: .other,
+            jobDescription: data["description"] as? String ?? "",
+            scheduledDate: scheduled,
+            scheduledTime: scheduledTime,
+            assignedEmployeeId: assignedEmployeeId ?? (assignedTeamId ?? "unassigned"),
+            assignedEmployeeName: assignedEmployeeName ?? assignedTeamName ?? "Team Job",
+            status: jobStatus,
+            notes: data["notes"] as? String,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            rescheduleRequest: nil
+        )
+    }
+
+    // Decode for admin (no membership filtering)
+    private func decodeJobForAdmin(document: QueryDocumentSnapshot) -> Job? {
+        let data = document.data()
+
+        let assignments = data["assignments"] as? [[String: Any]] ?? []
+        var assignedEmployeeId: String?
+        var assignedEmployeeName: String?
+        var assignedTeamId: String?
+        var assignedTeamName: String?
+        var scheduledDate: Date?
+
+        if let firstAssignment = assignments.first {
+            assignedEmployeeId = firstAssignment["employeeId"] as? String
+            assignedEmployeeName = firstAssignment["employeeName"] as? String
+            assignedTeamId = firstAssignment["teamId"] as? String
+            assignedTeamName = firstAssignment["teamName"] as? String
+            if let ts = firstAssignment["date"] as? Timestamp {
+                scheduledDate = ts.dateValue()
+            }
+        }
+
+        // Fallbacks for schedule
+        if scheduledDate == nil, let ts = data["installDate"] as? Timestamp {
+            scheduledDate = ts.dateValue()
+        }
+        if scheduledDate == nil, let ts = data["date"] as? Timestamp {
+            scheduledDate = ts.dateValue()
+        }
+        let scheduled = scheduledDate ?? Date()
+        let timeFormatter = DateFormatter()
+        timeFormatter.timeStyle = .short
+        let scheduledTime = timeFormatter.string(from: scheduled)
+
+        let clientName = (data["customerName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (data["jobNumber"] as? String).map { "Job \($0)" }
+            ?? "Job"
+        let clientAddress = (data["address"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (data["location"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? "Address not set"
+
+        let jobStatusRaw = data["status"] as? String ?? ""
+        let jobStatus = mapStatus(from: jobStatusRaw)
+
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+
+        var reschedule: RescheduleRequest?
+        if let rescheduleData = data["rescheduleRequest"] as? [String: Any] {
+            let reason = rescheduleData["reason"] as? String ?? ""
+            let requestedBy = rescheduleData["requestedBy"] as? String ?? ""
+            let requestedDate = (rescheduleData["requestedDate"] as? Timestamp)?.dateValue() ?? Date()
+            let newDate = (rescheduleData["newProposedDate"] as? Timestamp)?.dateValue()
+            let approved = rescheduleData["isApproved"] as? Bool
+            reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved)
+        }
+
+        return Job(
+            id: document.documentID,
+            clientName: clientName,
+            clientAddress: clientAddress,
+            clientPhone: data["phoneNumber"] as? String,
+            jobType: .other,
+            jobDescription: data["description"] as? String ?? "",
+            scheduledDate: scheduled,
+            scheduledTime: scheduledTime,
+            assignedEmployeeId: assignedEmployeeId ?? (assignedTeamId ?? "unassigned"),
+            assignedEmployeeName: assignedEmployeeName ?? assignedTeamName ?? "Team Job",
+            assignedTeamId: assignedTeamId,
+            assignedTeamName: assignedTeamName,
+            status: jobStatus,
+            notes: data["notes"] as? String,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            rescheduleRequest: reschedule
+        )
+    }
+
+    private func mapStatus(from raw: String) -> JobStatus {
+        switch raw.lowercased() {
+        case "completed": return .completed
+        case "complete": return .complete
+        case "picking_up": return .pickingUp
+        case "pick_up": return .pickUp
+        case "en_route": return .enRoute
+        case "cancelled": return .cancelled
+        case "rescheduled": return .rescheduled
+        case "in_progress", "picking_up", "delivering", "started": return .inProgress
+        default: return .scheduled
+        }
+    }
+}

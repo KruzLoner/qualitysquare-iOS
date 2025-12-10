@@ -71,64 +71,45 @@ class AuthenticationManager: ObservableObject {
         isLoading = true
         errorMessage = nil
 
-        // First, authenticate anonymously with Firebase to get proper permissions
-        Auth.auth().signInAnonymously { [weak self] authResult, error in
-            guard let self = self else { return }
-
-            if let error = error {
+        // Query Firestore for employee with matching PIN (no auth required for read access)
+        db.collection("employees")
+            .whereField("pin", isEqualTo: pin)
+            .getDocuments { [weak self] snapshot, error in
                 DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.errorMessage = "Authentication failed: \(error.localizedDescription)"
-                }
-                return
-            }
+                    self?.isLoading = false
 
-            // Now query Firestore for employee with matching PIN
-            self.db.collection("employees")
-                .whereField("pin", isEqualTo: pin)
-                .getDocuments { snapshot, error in
-                    DispatchQueue.main.async {
-                        self.isLoading = false
-
-                        if let error = error {
-                            self.errorMessage = error.localizedDescription
-                            // Sign out the anonymous user since PIN was invalid
-                            try? Auth.auth().signOut()
-                            return
-                        }
-
-                        guard let documents = snapshot?.documents, !documents.isEmpty else {
-                            self.errorMessage = "Invalid PIN. Please try again."
-                            // Sign out the anonymous user since PIN was invalid
-                            try? Auth.auth().signOut()
-                            return
-                        }
-
-                        // Get first matching employee
-                        let employeeData = documents[0].data()
-                        let employeeId = documents[0].documentID
-                        let employeeName = employeeData["name"] as? String
-                        let employeeStatus = employeeData["status"] as? String
-
-                        // Check if employee is active
-                        if employeeStatus?.lowercased() != "active" {
-                            self.errorMessage = "Your account is currently inactive. Please contact an administrator."
-                            // Sign out the anonymous user since account is inactive
-                            try? Auth.auth().signOut()
-                            return
-                        }
-
-                        self.currentUser = User(
-                            id: employeeId,
-                            email: nil,
-                            role: .employee,
-                            name: employeeName
-                        )
-                        self.userRole = .employee
-                        self.isAuthenticated = true
+                    if let error = error {
+                        self?.errorMessage = error.localizedDescription
+                        return
                     }
+
+                    guard let documents = snapshot?.documents, !documents.isEmpty else {
+                        self?.errorMessage = "Invalid PIN. Please try again."
+                        return
+                    }
+
+                    // Get first matching employee
+                    let employeeData = documents[0].data()
+                    let employeeId = documents[0].documentID
+                    let employeeName = employeeData["name"] as? String
+                    let employeeStatus = employeeData["status"] as? String
+
+                    // Check if employee is active
+                    if employeeStatus?.lowercased() != "active" {
+                        self?.errorMessage = "Your account is currently inactive. Please contact an administrator."
+                        return
+                    }
+
+                    self?.currentUser = User(
+                        id: employeeId,
+                        email: nil,
+                        role: .employee,
+                        name: employeeName
+                    )
+                    self?.userRole = .employee
+                    self?.isAuthenticated = true
                 }
-        }
+            }
     }
     
     // MARK: - Fetch User Role
@@ -174,4 +155,3 @@ class AuthenticationManager: ObservableObject {
         }
     }
 }
-

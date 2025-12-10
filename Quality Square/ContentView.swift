@@ -17,7 +17,7 @@ struct ContentView: View {
                 if authManager.userRole == .admin {
                     AdminDashboard()
                 } else {
-                    EmployeeDashboard()
+                    EmployeeTabView()
                 }
             } else {
                 // Login Screen

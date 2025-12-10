@@ -12,7 +12,6 @@ struct JobDetailView: View {
     @StateObject private var firestoreManager = FirestoreManager()
     @EnvironmentObject var authManager: AuthenticationManager
     
-    @State private var showingStatusUpdate = false
     @State private var showingRescheduleRequest = false
     @State private var selectedStatus: JobStatus
     @State private var isUpdating = false
@@ -125,14 +124,19 @@ struct JobDetailView: View {
                         .padding(.horizontal, 20)
                     }
                     
-                    // Current Status Card
-                    VStack(spacing: 12) {
+                    // Status Progress
+                    VStack(alignment: .leading, spacing: 16) {
                         HStack {
-                            Text("Current Status")
+                            Text("Status")
                                 .font(.headline)
                             Spacer()
-                            JobStatusBadge(status: job.status)
+                            JobStatusBadge(status: selectedStatus)
                         }
+                        
+                        StatusProgressView(
+                            steps: workflowStatuses,
+                            currentStatus: selectedStatus
+                        )
                     }
                     .padding(20)
                     .background(
@@ -210,19 +214,19 @@ struct JobDetailView: View {
                     
                     // Action Buttons
                     VStack(spacing: 12) {
-                        Button(action: { showingStatusUpdate = true }) {
-                            Label("Update Status", systemImage: "arrow.triangle.2.circlepath")
+                        Button(action: advanceStatus) {
+                            Label(nextStatusButtonTitle, systemImage: "arrow.triangle.2.circlepath")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
                                 .background(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.blue.opacity(0.9))
+                                        .fill(canAdvance ? Color.blue.opacity(0.9) : Color.gray.opacity(0.4))
                                 )
                                 .foregroundColor(.white)
                         }
-                        .disabled(isUpdating)
+                        .disabled(!canAdvance || isUpdating)
                         
                         Button(action: { showingRescheduleRequest = true }) {
                             Label("Request Reschedule", systemImage: "calendar.badge.clock")
@@ -248,20 +252,62 @@ struct JobDetailView: View {
         }
         .navigationTitle("Job Details")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showingStatusUpdate) {
-            StatusUpdateSheet(
-                job: job,
-                selectedStatus: $selectedStatus,
-                isUpdating: $isUpdating,
-                onUpdate: updateStatus
-            )
-        }
         .sheet(isPresented: $showingRescheduleRequest) {
             RescheduleRequestSheet(
                 job: job,
                 isUpdating: $isUpdating,
                 onSubmit: submitRescheduleRequest
             )
+        }
+    }
+    
+    private var workflowStatuses: [JobStatus] {
+        [.pickingUp, .pickUp, .enRoute, .complete]
+    }
+    
+    private var nextStatus: JobStatus? {
+        if selectedStatus == .complete || selectedStatus == .completed {
+            return nil
+        }
+        guard let idx = workflowStatuses.firstIndex(of: selectedStatus) else {
+            return workflowStatuses.first
+        }
+        let nextIndex = workflowStatuses.index(after: idx)
+        return nextIndex < workflowStatuses.count ? workflowStatuses[nextIndex] : nil
+    }
+    
+    private var nextStatusButtonTitle: String {
+        guard let next = nextStatus else { return "Completed" }
+        switch next {
+        case .pickingUp: return "Start Pickup"
+        case .pickUp: return "Mark Picked Up"
+        case .enRoute: return "Mark En Route"
+        case .complete: return "Mark Complete"
+        default: return "Advance Status"
+        }
+    }
+    
+    private var canAdvance: Bool {
+        nextStatus != nil
+    }
+    
+    private func advanceStatus() {
+        guard let jobId = job.id, let next = nextStatus else { return }
+        isUpdating = true
+        errorMessage = nil
+        successMessage = nil
+        
+        firestoreManager.updateJobStatus(jobId: jobId, status: next) { result in
+            DispatchQueue.main.async {
+                isUpdating = false
+                switch result {
+                case .success:
+                    selectedStatus = next
+                    successMessage = "Status updated to \(next.displayName)"
+                case .failure(let error):
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
     }
     
@@ -275,7 +321,6 @@ struct JobDetailView: View {
         firestoreManager.updateJobStatus(jobId: jobId, status: selectedStatus) { result in
             DispatchQueue.main.async {
                 isUpdating = false
-                showingStatusUpdate = false
                 
                 switch result {
                 case .success:
@@ -322,60 +367,34 @@ struct JobDetailView: View {
     }
 }
 
-// MARK: - Status Update Sheet
-struct StatusUpdateSheet: View {
-    let job: Job
-    @Binding var selectedStatus: JobStatus
-    @Binding var isUpdating: Bool
-    let onUpdate: () -> Void
-    
-    @Environment(\.dismiss) var dismiss
-    
+// MARK: - Status Progress
+private struct StatusProgressView: View {
+    let steps: [JobStatus]
+    let currentStatus: JobStatus
+
+    private var currentIndex: Int {
+        if currentStatus == .complete || currentStatus == .completed {
+            return steps.count - 1
+        }
+        return steps.firstIndex(of: currentStatus) ?? 0
+    }
+
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color(.systemGray6)
-                    .ignoresSafeArea()
-                
-                VStack(spacing: 20) {
-                    Text("Update job status")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 20)
-                    
-                    ForEach(JobStatus.allCases, id: \.self) { status in
-                        StatusOptionButton(
-                            status: status,
-                            isSelected: selectedStatus == status,
-                            action: { selectedStatus = status }
+        VStack(spacing: 12) {
+            HStack(spacing: 0) {
+                ForEach(steps.indices, id: \.self) { index in
+                    HStack(spacing: 0) {
+                        StepCircle(
+                            title: steps[index].displayName,
+                            isActive: index <= currentIndex
                         )
-                    }
-                    .padding(.horizontal, 20)
-                    
-                    Spacer()
-                    
-                    Button(action: onUpdate) {
-                        Text("Update Status")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.blue.opacity(0.9))
-                            )
-                            .foregroundColor(.white)
-                    }
-                    .disabled(isUpdating)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
-                }
-            }
-            .navigationTitle("Update Status")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
+
+                        if index < steps.count - 1 {
+                            Rectangle()
+                                .fill(index < currentIndex ? Color.blue.opacity(0.8) : Color.gray.opacity(0.3))
+                                .frame(height: 2)
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                 }
             }
@@ -383,31 +402,21 @@ struct StatusUpdateSheet: View {
     }
 }
 
-// MARK: - Status Option Button
-struct StatusOptionButton: View {
-    let status: JobStatus
-    let isSelected: Bool
-    let action: () -> Void
-    
+private struct StepCircle: View {
+    let title: String
+    let isActive: Bool
+
     var body: some View {
-        Button(action: action) {
-            HStack {
-                JobStatusBadge(status: status)
-                Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.blue)
-                }
-            }
-            .padding(16)
-            .background(backgroundView)
+        VStack(spacing: 6) {
+            Circle()
+                .fill(isActive ? Color.blue : Color.gray.opacity(0.3))
+                .frame(width: 16, height: 16)
+
+            Text(title)
+                .font(.caption2)
+                .foregroundColor(isActive ? .primary : .secondary)
         }
-        .buttonStyle(PlainButtonStyle())
-    }
-    
-    private var backgroundView: some View {
-        RoundedRectangle(cornerRadius: 12)
-            .fill(isSelected ? Color.blue.opacity(0.1) : Color(uiColor: .systemGray6).opacity(0.3))
+        .frame(minWidth: 70)
     }
 }
 
@@ -529,4 +538,3 @@ struct RescheduleRequestSheet: View {
     JobDetailView(job: sampleJob)
         .environmentObject(AuthenticationManager())
 }
-

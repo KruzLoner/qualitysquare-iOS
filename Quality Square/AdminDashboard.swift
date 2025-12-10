@@ -18,7 +18,66 @@ struct AdminDashboard: View {
     @State private var isLoading = false
     @State private var showingLogoutConfirm = false
     @State private var selectedTab = 0
+    @State private var selectedJobFilter: JobStatus? = nil
     @State private var errorMessage: String?
+
+    private var rescheduleRequests: [Job] {
+        todayJobs.filter { $0.rescheduleRequest != nil }
+    }
+
+    private var inProgressCount: Int {
+        todayJobs.filter { job in
+            [.inProgress, .pickingUp, .pickUp, .enRoute].contains(job.status)
+        }.count
+    }
+    
+    private var activeJobs: [Job] {
+        todayJobs.filter { [.inProgress, .pickingUp, .pickUp, .enRoute].contains($0.status) }
+    }
+
+    private var completedJobs: [Job] {
+        todayJobs.filter { $0.status == .completed || $0.status == .complete }
+    }
+
+    private var rescheduledJobs: [Job] {
+        todayJobs.filter { $0.status == .rescheduled }
+    }
+
+    private var cancelledJobs: [Job] {
+        todayJobs.filter { $0.status == .cancelled }
+    }
+
+    private var filteredTodayJobs: [Job] {
+        guard let filter = selectedJobFilter else { return todayJobs }
+        switch filter {
+        case .inProgress:
+            return activeJobs
+        case .rescheduled:
+            return rescheduledJobs
+        case .cancelled:
+            return cancelledJobs
+        case .completed, .complete:
+            return completedJobs
+        default:
+            return todayJobs
+        }
+    }
+
+    private var groupedJobs: [JobStatus: [Job]] {
+        Dictionary(grouping: filteredTodayJobs, by: { $0.status })
+    }
+
+    private var jobFilters: [JobStatus] {
+        [.inProgress, .rescheduled, .cancelled, .completed]
+    }
+
+
+    private func statusSort(_ lhs: JobStatus, _ rhs: JobStatus) -> Bool {
+        let order: [JobStatus] = [.pickingUp, .pickUp, .enRoute, .complete, .completed, .inProgress, .rescheduled, .cancelled]
+        let l = order.firstIndex(of: lhs) ?? order.count
+        let r = order.firstIndex(of: rhs) ?? order.count
+        return l < r
+    }
     
     var body: some View {
         NavigationView {
@@ -136,19 +195,12 @@ struct AdminDashboard: View {
                         ScrollView {
                             VStack(spacing: 20) {
                                 // Job Stats
-                                HStack(spacing: 12) {
-                                    StatCard(
-                                        title: "Total Jobs",
-                                        value: "\(todayJobs.count)",
-                                        icon: "briefcase.fill",
-                                        color: .blue
-                                    )
-
-                                    StatCard(
-                                        title: "Completed",
-                                        value: "\(todayJobs.filter { $0.status == .completed }.count)",
-                                        icon: "checkmark.circle.fill",
-                                        color: .green
+                                VStack(spacing: 12) {
+                                    CompactJobStats(
+                                        total: todayJobs.count,
+                                        active: inProgressCount,
+                                        completed: todayJobs.filter { $0.status == .completed || $0.status == .complete }.count,
+                                        reschedules: rescheduleRequests.count
                                     )
                                 }
                                 .padding(.horizontal, 20)
@@ -156,34 +208,87 @@ struct AdminDashboard: View {
 
                                 // Jobs by Status
                                 VStack(alignment: .leading, spacing: 16) {
-                                    Text("Today's Jobs")
-                                        .font(.headline)
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        HStack {
+                                            Text("Today's Jobs")
+                                                .font(.headline)
+                                            Spacer()
+                                        }
                                         .padding(.horizontal, 20)
 
-                                    if todayJobs.isEmpty {
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 10) {
+                                                FilterChip(title: "All", count: todayJobs.count, isSelected: selectedJobFilter == nil) {
+                                                    selectedJobFilter = nil
+                                                }
+                                                FilterChip(title: "Active", count: activeJobs.count, isSelected: selectedJobFilter == .inProgress) {
+                                                    selectedJobFilter = .inProgress
+                                                }
+                                                FilterChip(title: "Rescheduled", count: rescheduledJobs.count, isSelected: selectedJobFilter == .rescheduled) {
+                                                    selectedJobFilter = .rescheduled
+                                                }
+                                                FilterChip(title: "Cancelled", count: cancelledJobs.count, isSelected: selectedJobFilter == .cancelled) {
+                                                    selectedJobFilter = .cancelled
+                                                }
+                                                FilterChip(title: "Completed", count: completedJobs.count, isSelected: selectedJobFilter == .completed || selectedJobFilter == .complete) {
+                                                    selectedJobFilter = .completed
+                                                }
+                                            }
+                                            .padding(.horizontal, 20)
+                                            .padding(.vertical, 4)
+                                        }
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .fill(.ultraThinMaterial)
+                                                .padding(.horizontal, 12)
+                                        )
+                                        .padding(.top, -4)
+                                    }
+
+                                    if filteredTodayJobs.isEmpty {
                                         EmptyStateView(
                                             icon: "calendar.badge.clock",
                                             message: "No jobs scheduled for today"
                                         )
                                     } else {
-                                        ForEach(JobStatus.allCases, id: \.self) { status in
-                                            let filteredJobs = todayJobs.filter { $0.status == status }
-                                            if !filteredJobs.isEmpty {
+                                        ForEach(groupedJobs.keys.sorted(by: statusSort), id: \.self) { status in
+                                            if let jobs = groupedJobs[status], !jobs.isEmpty {
                                                 VStack(alignment: .leading, spacing: 12) {
                                                     HStack {
                                                         JobStatusBadge(status: status)
-                                                        Text("(\(filteredJobs.count))")
+                                                        Text("(\(jobs.count))")
                                                             .font(.caption)
                                                             .foregroundColor(.secondary)
                                                         Spacer()
                                                     }
                                                     .padding(.horizontal, 20)
 
-                                                    ForEach(filteredJobs) { job in
+                                                    ForEach(jobs) { job in
                                                         AdminJobRow(job: job)
                                                     }
                                                 }
                                             }
+                                        }
+                                    }
+                                }
+
+                                // Reschedule Requests
+                                if !rescheduleRequests.isEmpty {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        HStack {
+                                            Image(systemName: "calendar.badge.exclamationmark")
+                                                .foregroundColor(.purple)
+                                            Text("Reschedule Requests")
+                                                .font(.headline)
+                                            Spacer()
+                                            Text("\(rescheduleRequests.count)")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .padding(.horizontal, 20)
+
+                                        ForEach(rescheduleRequests) { job in
+                                            RescheduleCard(job: job)
                                         }
                                     }
                                 }
@@ -373,6 +478,121 @@ struct AdminDashboard: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Filter Chip
+private struct FilterChip: View {
+    let title: String
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Text("\(count)")
+                    .font(.caption2)
+                    .padding(6)
+                    .background(Circle().fill(isSelected ? Color.blue.opacity(0.2) : Color.white.opacity(0.12)))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.blue.opacity(0.18) : Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isSelected ? Color.blue.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
+            .foregroundColor(.primary)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Compact Job Stats
+private struct CompactJobStats: View {
+    let total: Int
+    let active: Int
+    let completed: Int
+    let reschedules: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                statBlock(title: "Total", value: total, icon: "briefcase.fill", color: .blue)
+                statBlock(title: "Active", value: active, icon: "clock.fill", color: .orange)
+                statBlock(title: "Done", value: completed, icon: "checkmark.circle.fill", color: .green)
+                statBlock(title: "Resched", value: reschedules, icon: "calendar.badge.clock", color: .purple)
+            }
+        }
+    }
+
+    private func statBlock(title: String, value: Int, icon: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundColor(color)
+            Text("\(value)")
+                .font(.headline)
+            Text(title)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+        )
+    }
+}
+
+// MARK: - Reschedule Card
+private struct RescheduleCard: View {
+    let job: Job
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(job.clientName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                    if let newDate = job.rescheduleRequest?.newProposedDate {
+                        Text("Proposed: \(formatDate(newDate))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                JobStatusBadge(status: job.status)
+            }
+
+            if let reason = job.rescheduleRequest?.reason, !reason.isEmpty {
+                Text(reason)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+        )
+        .padding(.horizontal, 20)
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: date)
     }
 }
 
@@ -668,38 +888,55 @@ struct AdminJobRow: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(job.clientName)
                         .font(.subheadline)
-                        .fontWeight(.medium)
-                    
+                        .fontWeight(.semibold)
                     Text(job.jobType.rawValue)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                
+
                 Spacer()
-                
-                VStack(alignment: .trailing, spacing: 4) {
+
+                VStack(alignment: .trailing, spacing: 6) {
+                    JobStatusBadge(status: job.status)
                     Text(job.scheduledTime)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    
-                    Text(job.assignedEmployeeName)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
-            
+
+            HStack(spacing: 8) {
+                Label(job.assignedEmployeeName, systemImage: "person.fill")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if let teamName = job.assignedTeamName {
+                    Divider()
+                    Label(teamName, systemImage: "person.3.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
             if job.status == .rescheduled, let reschedule = job.rescheduleRequest {
-                HStack(spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundColor(.orange)
-                    Text("Reschedule requested")
-                        .font(.caption)
-                        .foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Reschedule requested")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                        if !reschedule.reason.isEmpty {
+                            Text(reschedule.reason)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
                 }
             }
         }
@@ -707,6 +944,10 @@ struct AdminJobRow: View {
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
         .padding(.horizontal, 20)
     }
@@ -891,4 +1132,3 @@ struct EmployeeListRow: View {
     AdminDashboard()
         .environmentObject(AuthenticationManager())
 }
-

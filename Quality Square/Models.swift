@@ -91,14 +91,36 @@ enum JobStatus: String, Codable, CaseIterable {
     case completed = "Completed"
     case rescheduled = "Rescheduled"
     case cancelled = "Cancelled"
+
+    // Workflow-specific statuses
+    case pickingUp = "picking_up"
+    case pickUp = "pick_up"
+    case enRoute = "en_route"
+    case complete = "complete"
     
     var color: String {
         switch self {
         case .scheduled: return "blue"
         case .inProgress: return "orange"
-        case .completed: return "green"
+        case .completed, .complete: return "green"
         case .rescheduled: return "purple"
         case .cancelled: return "red"
+        case .pickingUp: return "teal"
+        case .pickUp: return "blue"
+        case .enRoute: return "orange"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .pickingUp: return "Picking Up"
+        case .pickUp: return "Picked Up"
+        case .enRoute: return "En Route"
+        case .complete, .completed: return "Complete"
+        case .scheduled: return "Scheduled"
+        case .inProgress: return "In Progress"
+        case .rescheduled: return "Rescheduled"
+        case .cancelled: return "Cancelled"
         }
     }
 }
@@ -124,6 +146,8 @@ struct Job: Identifiable, Codable {
     var scheduledTime: String // e.g., "9:00 AM"
     var assignedEmployeeId: String
     var assignedEmployeeName: String
+    var assignedTeamId: String?
+    var assignedTeamName: String?
     var status: JobStatus
     var notes: String?
     var createdAt: Date
@@ -141,6 +165,8 @@ struct Job: Identifiable, Codable {
         case scheduledTime
         case assignedEmployeeId
         case assignedEmployeeName
+        case assignedTeamId
+        case assignedTeamName
         case status
         case notes
         case createdAt
@@ -262,4 +288,3 @@ struct EmployeeStatus: Identifiable {
         return duration / 3600.0 // Convert seconds to hours
     }
 }
-
