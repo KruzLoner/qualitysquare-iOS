@@ -86,49 +86,45 @@ struct AdminDashboard: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color(.systemGray6)
-                    .ignoresSafeArea()
-                
                 VStack(spacing: 0) {
-                    // Header with Logout
-                    HStack {
+                    // Compact glass header with logout
+                    HStack(spacing: 16) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Admin Dashboard")
                                 .font(.title2)
                                 .fontWeight(.bold)
-                            
-                            Text("Manage your team and jobs")
-                                .font(.caption)
+
+                            Text("Manage team & jobs")
+                                .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
-                        
+
                         Spacer()
-                        
+
                         Button(action: { showingLogoutConfirm = true }) {
                             Image(systemName: "rectangle.portrait.and.arrow.right")
                                 .font(.title3)
                                 .foregroundColor(.secondary)
+                                .padding(10)
+                                .background(
+                                    Circle()
+                                        .fill(Color.red.opacity(0.1))
+                                )
                         }
                     }
                     .padding(20)
                     .background(
-                        RoundedRectangle(cornerRadius: 16)
+                        RoundedRectangle(cornerRadius: 20)
                             .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                            )
+                            .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
                     )
                     .padding(.horizontal, 20)
-                    .padding(.top, 20)
-                    
-                    // Tab Picker
-                    Picker("View", selection: $selectedTab) {
-                        Text("Attendance").tag(0)
-                        Text("Jobs").tag(1)
-                        Text("Teams").tag(2)
-                        Text("Employees").tag(3)
-                        Text("Vehicles").tag(4)
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
 
                     // Error Banner
                     if let error = errorMessage {
@@ -195,33 +191,18 @@ struct AdminDashboard: View {
                             }
                         }
                         .tag(0)
+                        .tabItem {
+                            Label("Attendance", systemImage: "clock.fill")
+                        }
                         
                         // Jobs Tab
                         ScrollView {
                             VStack(spacing: 20) {
-                                // Job Stats
-                                VStack(spacing: 12) {
-                                    CompactJobStats(
-                                        total: todayJobs.count,
-                                        active: inProgressCount,
-                                        completed: todayJobs.filter { $0.status == .completed || $0.status == .complete }.count,
-                                        reschedules: rescheduleRequests.count
-                                    )
-                                }
-                                .padding(.horizontal, 20)
-                                .padding(.top, 8)
-
                                 // Jobs by Status
                                 VStack(alignment: .leading, spacing: 16) {
                                     VStack(alignment: .leading, spacing: 12) {
-                                        HStack {
-                                            Text("Today's Jobs")
-                                                .font(.headline)
-                                            Spacer()
-                                        }
-                                        .padding(.horizontal, 20)
 
-                                        VStack(spacing: 8) {
+                                        VStack(spacing: 12) {
                                             HStack(spacing: 12) {
                                                 FilterChip(title: "All", count: todayJobs.count, isSelected: selectedJobFilter == nil) {
                                                     selectedJobFilter = nil
@@ -229,6 +210,9 @@ struct AdminDashboard: View {
                                                 FilterChip(title: "Rescheduled", count: rescheduledJobs.count, isSelected: selectedJobFilter == .rescheduled) {
                                                     selectedJobFilter = .rescheduled
                                                 }
+                                            }
+
+                                            HStack(spacing: 12) {
                                                 FilterChip(title: "Cancelled", count: cancelledJobs.count, isSelected: selectedJobFilter == .cancelled) {
                                                     selectedJobFilter = .cancelled
                                                 }
@@ -236,19 +220,8 @@ struct AdminDashboard: View {
                                                     selectedJobFilter = .completed
                                                 }
                                             }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.horizontal, 20)
-                                            .padding(.vertical, 6)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 14)
-                                                    .fill(.ultraThinMaterial)
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: 14)
-                                                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                                                    )
-                                            )
                                         }
-                                        .padding(.top, -4)
+                                        .padding(.horizontal, 20)
                                     }
 
                                     if filteredTodayJobs.isEmpty {
@@ -304,6 +277,9 @@ struct AdminDashboard: View {
                             }
                         }
                         .tag(1)
+                        .tabItem {
+                            Label("Jobs", systemImage: "briefcase.fill")
+                        }
 
                         // Teams Tab
                         ScrollView {
@@ -350,6 +326,9 @@ struct AdminDashboard: View {
                             }
                         }
                         .tag(2)
+                        .tabItem {
+                            Label("Teams", systemImage: "person.3.sequence.fill")
+                        }
 
                         // Employees Tab
                         ScrollView {
@@ -385,7 +364,7 @@ struct AdminDashboard: View {
                                             message: "No employees found"
                                         )
                                     } else {
-                                        ForEach(allEmployees) { employee in
+                                        ForEach(Array(allEmployees.enumerated()), id: \.offset) { index, employee in
                                             EmployeeListRow(employee: employee)
                                         }
                                     }
@@ -396,6 +375,9 @@ struct AdminDashboard: View {
                             }
                         }
                         .tag(3)
+                        .tabItem {
+                            Label("Employees", systemImage: "person.text.rectangle.fill")
+                        }
 
                         // Vehicles Tab
                         ScrollView {
@@ -469,8 +451,11 @@ struct AdminDashboard: View {
                             }
                         }
                         .tag(4)
+                        .tabItem {
+                            Label("Vehicles", systemImage: "car.fill")
+                        }
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .accentColor(.primary)
                 }
                 .refreshable {
                     await loadData()
@@ -531,10 +516,26 @@ struct AdminDashboard: View {
                 isLoading = false
                 switch result {
                 case .success(let employees):
-                    allEmployees = employees
-                    print("✅ [AdminDashboard] Loaded \(employees.count) employee(s)")
+                    // Debug: Print all employee data
+                    print("📋 [AdminDashboard] Raw employees data:")
+                    for (index, emp) in employees.enumerated() {
+                        print("  [\(index)] ID: \(emp.id ?? "nil"), Name: \(emp.name), PIN: \(emp.pin ?? "nil"), Role: \(emp.role ?? "nil")")
+                    }
 
-                    if employees.isEmpty {
+                    // Deduplicate employees by ID
+                    let unique = Dictionary(grouping: employees, by: { $0.id ?? $0.name })
+                        .compactMap { $0.value.first }
+                        .sorted { $0.name < $1.name }
+                    allEmployees = unique
+                    print("✅ [AdminDashboard] Loaded \(unique.count) unique employee(s) from \(employees.count) total")
+
+                    // Debug: Print unique employee data
+                    print("📋 [AdminDashboard] Unique employees:")
+                    for (index, emp) in unique.enumerated() {
+                        print("  [\(index)] ID: \(emp.id ?? "nil"), Name: \(emp.name), PIN: \(emp.pin ?? "nil"), Role: \(emp.role ?? "nil")")
+                    }
+
+                    if unique.isEmpty {
                         errorMessage = "No active employees found. Check Firebase database."
                     }
                 case .failure(let error):
@@ -617,29 +618,44 @@ private struct FilterChip: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Text(title)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                Text("\(count)")
-                    .font(.caption2)
-                    .padding(6)
-                    .background(Circle().fill(isSelected ? Color.blue.opacity(0.2) : Color.white.opacity(0.12)))
+        GeometryReader { geometry in
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    Text(title)
+                        .font(geometry.size.width < 160 ? .caption : .subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    Spacer(minLength: 2)
+
+                    Text("\(count)")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(isSelected ? Color.blue.opacity(0.3) : Color.white.opacity(0.2))
+                        )
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(isSelected ? Color.blue.opacity(0.6) : Color.white.opacity(0.2), lineWidth: isSelected ? 2 : 1)
+                        )
+                        .shadow(color: isSelected ? Color.blue.opacity(0.2) : Color.black.opacity(0.03), radius: isSelected ? 8 : 4, x: 0, y: 2)
+                )
+                .foregroundColor(isSelected ? .blue : .primary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.blue.opacity(0.18) : Color.white.opacity(0.06))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected ? Color.blue.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1)
-                    )
-            )
-            .foregroundColor(.primary)
+            .buttonStyle(PlainButtonStyle())
         }
-        .buttonStyle(PlainButtonStyle())
+        .frame(height: 48)
     }
 }
 
@@ -1270,6 +1286,18 @@ struct EmployeeListRow: View {
                     .fontWeight(.medium)
 
                 HStack(spacing: 4) {
+                    if let id = employee.id {
+                        Text("ID: \(id)")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+
+                    if employee.id != nil, employee.role != nil {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
                     if let role = employee.role {
                         Text(role)
                             .font(.caption)

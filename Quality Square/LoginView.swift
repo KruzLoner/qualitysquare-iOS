@@ -12,29 +12,24 @@ struct LoginView: View {
     @State private var selectedTab = 1  // Default to Employee
     
     var body: some View {
-        ZStack {
-            // Subtle gradient background
-            Color(.systemGray6)
-                .ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                Spacer()
-                    .frame(height: 60)
-                
-                // Header
-                VStack(spacing: 12) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .font(.system(size: 50))
-                        .foregroundStyle(.primary.opacity(0.8))
-                    
-                    Text("Quality Square")
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundColor(.primary)
-                }
-                .padding(.bottom, 40)
-                
-                // Glass Card Container
+        GeometryReader { geometry in
+            ScrollView {
                 VStack(spacing: 0) {
+                    Spacer()
+                        .frame(height: 60)
+
+                    // Header
+                    VStack(spacing: 12) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .font(.system(size: 50))
+                            .foregroundStyle(.primary.opacity(0.8))
+
+                        Text("Quality Square")
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundColor(.primary)
+                    }
+                    .padding(.bottom, 40)
+
                     // Tab Selector
                     HStack(spacing: 0) {
                         TabButton(
@@ -46,7 +41,7 @@ struct LoginView: View {
                                 selectedTab = 1
                             }
                         }
-                        
+
                         TabButton(
                             title: "Admin",
                             icon: "lock.fill",
@@ -63,8 +58,8 @@ struct LoginView: View {
                             .fill(.ultraThinMaterial)
                     )
                     .padding(.horizontal, 24)
-                    .padding(.top, 20)
-                    
+                    .padding(.bottom, 30)
+
                     // Content Area
                     TabView(selection: $selectedTab) {
                         EmployeeLoginView()
@@ -73,17 +68,16 @@ struct LoginView: View {
                         AdminLoginView()
                             .tag(0)
                     }
+                    .frame(height: 350)
                     .tabViewStyle(.page(indexDisplayMode: .never))
+
+                    Spacer()
+                        .frame(height: 60)
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(.ultraThinMaterial)
-                        .shadow(color: .black.opacity(0.08), radius: 20, x: 0, y: 10)
-                )
-                .padding(.horizontal, 20)
-                
-                Spacer()
+                .frame(minHeight: geometry.size.height)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .ignoresSafeArea(.keyboard)
         }
     }
 }
@@ -118,112 +112,63 @@ struct AdminLoginView: View {
     @State private var email = ""
     @State private var password = ""
     @FocusState private var focusedField: Field?
-    
+
     enum Field {
         case email, password
     }
-    
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                // Header
-                VStack(spacing: 8) {
-                    Text("Admin Access")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                    
-                    Text("Enter your credentials")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.top, 32)
-                .padding(.bottom, 8)
-                
+            VStack(spacing: 20) {
                 VStack(spacing: 16) {
                     // Email Field
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Email")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 12) {
-                            Image(systemName: "envelope.fill")
-                                .foregroundColor(.secondary)
-                                .frame(width: 20)
-                            
-                            TextField("admin@example.com", text: $email)
-                                .textContentType(.emailAddress)
-                                .autocapitalization(.none)
-                                .keyboardType(.emailAddress)
-                                .focused($focusedField, equals: .email)
-                                .submitLabel(.next)
-                                .onSubmit {
-                                    focusedField = .password
-                                }
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .autocapitalization(.none)
+                        .keyboardType(.emailAddress)
+                        .focused($focusedField, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit {
+                            focusedField = .password
                         }
                         .padding()
                         .background(
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(.thinMaterial)
+                                .fill(.ultraThinMaterial)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .stroke(focusedField == .email ? Color.primary.opacity(0.3) : Color.clear, lineWidth: 1.5)
+                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
                                 )
                         )
-                    }
-                    
+
                     // Password Field
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Password")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 12) {
-                            Image(systemName: "lock.fill")
-                                .foregroundColor(.secondary)
-                                .frame(width: 20)
-                            
-                            SecureField("Enter password", text: $password)
-                                .textContentType(.password)
-                                .focused($focusedField, equals: .password)
-                                .submitLabel(.go)
-                                .onSubmit {
-                                    loginAdmin()
-                                }
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
+                        .focused($focusedField, equals: .password)
+                        .submitLabel(.go)
+                        .onSubmit {
+                            loginAdmin()
                         }
                         .padding()
                         .background(
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(.thinMaterial)
+                                .fill(.ultraThinMaterial)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .stroke(focusedField == .password ? Color.primary.opacity(0.3) : Color.clear, lineWidth: 1.5)
+                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
                                 )
                         )
-                    }
                 }
                 .padding(.horizontal, 24)
-                
+
                 // Error Message
                 if let error = authManager.errorMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundColor(.red)
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(.red.opacity(0.1))
-                    )
-                    .padding(.horizontal, 24)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 24)
                 }
-                
+
                 // Sign In Button
                 Button(action: loginAdmin) {
                     HStack(spacing: 8) {
@@ -239,17 +184,14 @@ struct AdminLoginView: View {
                     .padding(.vertical, 14)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(isFormValid ? Color.primary.opacity(0.9) : Color.secondary.opacity(0.3))
+                            .fill(isFormValid ? Color.blue : Color.secondary.opacity(0.3))
                     )
                     .foregroundColor(.white)
                 }
                 .disabled(!isFormValid || authManager.isLoading)
                 .padding(.horizontal, 24)
-                .padding(.top, 8)
-                
-                Spacer()
-                    .frame(height: 40)
             }
+            .padding(.top, 20)
         }
         .scrollDismissesKeyboard(.interactively)
     }
@@ -268,149 +210,87 @@ struct EmployeeLoginView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @State private var pin = ""
     @FocusState private var isPinFocused: Bool
-    
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
-                // Header
-                VStack(spacing: 8) {
-                    Text("Employee Login")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                    
-                    Text("Enter your PIN")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.top, 20)
-                .padding(.bottom, 4)
-                
-                // PIN Display
-                VStack(spacing: 20) {
-                    HStack(spacing: 10) {
-                        ForEach(0..<6, id: \.self) { index in
-                            PINDigitView(
-                                digit: index < pin.count ? String(pin[pin.index(pin.startIndex, offsetBy: index)]) : nil,
-                                isActive: index == pin.count
-                            )
+            VStack(spacing: 20) {
+                // PIN Input Field
+                TextField("Enter PIN (4-6 digits)", text: $pin)
+                    .keyboardType(.numberPad)
+                    .focused($isPinFocused)
+                    .submitLabel(.go)
+                    .onChange(of: pin) { oldValue, newValue in
+                        // Limit to 6 digits
+                        if newValue.count > 6 {
+                            pin = String(newValue.prefix(6))
+                        }
+
+                        // Auto-login when 4 or 6 digits entered
+                        if newValue.count == 4 || newValue.count == 6 {
+                            loginEmployee()
                         }
                     }
-                    .padding(.vertical, 10)
-                    
-                    // Hidden TextField for PIN input
-                    TextField("", text: $pin)
-                        .keyboardType(.numberPad)
-                        .focused($isPinFocused)
-                        .opacity(0)
-                        .frame(height: 0)
-                        .onChange(of: pin) { oldValue, newValue in
-                            // Limit to 6 digits
-                            if newValue.count > 6 {
-                                pin = String(newValue.prefix(6))
-                            }
-                            
-                            // Auto-login when 4 or 6 digits entered
-                            if newValue.count == 4 || newValue.count == 6 {
-                                loginEmployee()
-                            }
-                        }
-                }
-                .padding(.horizontal, 24)
-                .onTapGesture {
-                    isPinFocused = true
-                }
-                
-                // Error Message
-                if let error = authManager.errorMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundColor(.red)
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity)
+                    .padding()
                     .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(.red.opacity(0.1))
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
                     )
                     .padding(.horizontal, 24)
+
+                // Error Message
+                if let error = authManager.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 24)
                 }
-                
-                // Number Pad
-                VStack(spacing: 8) {
-                    ForEach(0..<3) { row in
-                        HStack(spacing: 8) {
-                            ForEach(1..<4) { col in
-                                let number = row * 3 + col
-                                NumberButton(number: "\(number)") {
-                                    if pin.count < 6 {
-                                        pin += "\(number)"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Last row with delete, 0, enter
+
+                // Sign In Button
+                Button(action: loginEmployee) {
                     HStack(spacing: 8) {
-                        Button(action: {
-                            if !pin.isEmpty {
-                                pin.removeLast()
-                            }
-                        }) {
-                            Image(systemName: "delete.left.fill")
-                                .font(.title3)
-                                .fontWeight(.medium)
-                                .frame(width: 60, height: 60)
-                                .background(
-                                    Circle()
-                                        .fill(.thinMaterial)
-                                )
-                                .foregroundColor(.primary)
-                        }
-                        
-                        NumberButton(number: "0") {
-                            if pin.count < 6 {
-                                pin += "0"
-                            }
-                        }
-                        
-                        Button(action: {
-                            loginEmployee()
-                        }) {
-                            Text("Enter")
-                                .font(.title3)
-                                .fontWeight(.medium)
-                                .frame(width: 60, height: 60)
-                                .background(
-                                    Circle()
-                                        .fill(.thinMaterial)
-                                )
-                                .foregroundColor(.primary)
+                        if authManager.isLoading {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            Text("Sign In")
+                                .fontWeight(.semibold)
                         }
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(isFormValid ? Color.blue : Color.secondary.opacity(0.3))
+                    )
+                    .foregroundColor(.white)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 2)
-                .padding(.bottom, 4)
+                .disabled(!isFormValid || authManager.isLoading)
+                .padding(.horizontal, 24)
             }
-            .padding(.bottom, 4)
-            .frame(maxWidth: .infinity, alignment: .top)
+            .padding(.top, 20)
         }
+        .scrollDismissesKeyboard(.interactively)
         .onAppear {
             isPinFocused = true
         }
     }
-    
+
+    private var isFormValid: Bool {
+        pin.count >= 4 && pin.count <= 6
+    }
+
     private func loginEmployee() {
+        guard isFormValid else { return }
         isPinFocused = false
-        
+
         // Small delay for better UX
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             authManager.loginEmployee(pin: pin)
-            
+
             // Clear PIN after attempt
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if !authManager.isAuthenticated {
@@ -418,74 +298,6 @@ struct EmployeeLoginView: View {
                 }
             }
         }
-    }
-}
-
-struct PINDigitView: View {
-    let digit: String?
-    let isActive: Bool
-    
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(.thinMaterial)
-                .frame(width: 48, height: 56)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(isActive ? Color.primary.opacity(0.3) : Color.primary.opacity(0.1), lineWidth: isActive ? 2 : 1)
-                )
-            
-            if let digit = digit {
-                Text(digit)
-                    .font(.title2)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-            } else if isActive {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.primary.opacity(0.6))
-                    .frame(width: 2, height: 26)
-            }
-        }
-    }
-}
-
-struct NumberButton: View {
-    let number: String
-    let action: () -> Void
-    @State private var isPressed = false
-    
-    var body: some View {
-        Button(action: {
-            // Haptic feedback
-            let generator = UIImpactFeedbackGenerator(style: .light)
-            generator.impactOccurred()
-            action()
-        }) {
-            Text(number)
-                .font(.title2)
-                .fontWeight(.medium)
-                .frame(width: 60, height: 60)
-                .background(
-                    Circle()
-                        .fill(.thinMaterial)
-                )
-                .foregroundColor(.primary)
-                .scaleEffect(isPressed ? 0.92 : 1.0)
-        }
-        .buttonStyle(PlainButtonStyle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        isPressed = true
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        isPressed = false
-                    }
-                }
-        )
     }
 }
 
