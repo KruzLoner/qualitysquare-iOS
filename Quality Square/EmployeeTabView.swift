@@ -184,19 +184,19 @@ struct JobHistoryView: View {
                 } else {
                     ForEach(jobs) { job in
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(job.clientName)
+                            Text(job.clientName ?? "")
                                 .font(.headline)
-                            Text(job.jobType.rawValue)
+                            Text(job.displayInstallType)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             HStack(spacing: 8) {
-                                Label(job.scheduledTime, systemImage: "clock")
-                                Label(job.clientAddress, systemImage: "location.fill")
+                                Label(job.scheduledTime ?? "", systemImage: "clock")
+                                Label(job.clientAddress ?? "", systemImage: "location.fill")
                                     .lineLimit(1)
                             }
                             .font(.caption)
                             .foregroundColor(.secondary)
-                            Text(job.status.displayName)
+                            Text(job.status?.displayName ?? "")
                                 .font(.caption2)
                                 .fontWeight(.semibold)
                                 .padding(.horizontal, 8)

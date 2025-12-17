@@ -111,6 +111,7 @@ struct AdminLoginView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @State private var email = ""
     @State private var password = ""
+    @State private var rememberMe = false
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -161,6 +162,15 @@ struct AdminLoginView: View {
                 }
                 .padding(.horizontal, 24)
 
+                // Remember Me Toggle
+                Toggle(isOn: $rememberMe) {
+                    Text("Remember Me")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+                .padding(.horizontal, 24)
+                .tint(.blue)
+
                 // Error Message
                 if let error = authManager.errorMessage {
                     Text(error)
@@ -194,14 +204,26 @@ struct AdminLoginView: View {
             .padding(.top, 20)
         }
         .scrollDismissesKeyboard(.interactively)
+        .onAppear {
+            loadSavedCredentials()
+        }
     }
-    
+
     private var isFormValid: Bool {
         !email.isEmpty && !password.isEmpty && email.contains("@")
     }
-    
+
+    private func loadSavedCredentials() {
+        if let saved = authManager.getSavedAdminCredentials() {
+            email = saved.email
+            password = saved.password
+            rememberMe = saved.remember
+        }
+    }
+
     private func loginAdmin() {
         focusedField = nil
+        authManager.saveAdminCredentials(email: email, password: password, remember: rememberMe)
         authManager.loginAdmin(email: email, password: password)
     }
 }
@@ -209,6 +231,7 @@ struct AdminLoginView: View {
 struct EmployeeLoginView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @State private var pin = ""
+    @State private var rememberMe = false
     @FocusState private var isPinFocused: Bool
 
     var body: some View {
@@ -240,6 +263,15 @@ struct EmployeeLoginView: View {
                             )
                     )
                     .padding(.horizontal, 24)
+
+                // Remember Me Toggle
+                Toggle(isOn: $rememberMe) {
+                    Text("Remember Me")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+                .padding(.horizontal, 24)
+                .tint(.blue)
 
                 // Error Message
                 if let error = authManager.errorMessage {
@@ -275,6 +307,7 @@ struct EmployeeLoginView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .onAppear {
+            loadSavedPin()
             isPinFocused = true
         }
     }
@@ -283,15 +316,25 @@ struct EmployeeLoginView: View {
         pin.count >= 4 && pin.count <= 6
     }
 
+    private func loadSavedPin() {
+        if let saved = authManager.getSavedEmployeePin() {
+            pin = saved.pin
+            rememberMe = saved.remember
+        }
+    }
+
     private func loginEmployee() {
         guard isFormValid else { return }
         isPinFocused = false
+
+        // Save credentials before login attempt
+        authManager.saveEmployeePin(pin: pin, remember: rememberMe)
 
         // Small delay for better UX
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             authManager.loginEmployee(pin: pin)
 
-            // Clear PIN after attempt
+            // Clear PIN after attempt if login fails
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if !authManager.isAuthenticated {
                     pin = ""

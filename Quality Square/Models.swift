@@ -93,10 +93,10 @@ enum JobStatus: String, Codable, CaseIterable {
     case cancelled = "Cancelled"
 
     // Workflow-specific statuses
-    case pickingUp = "picking_up"
-    case pickUp = "pick_up"
-    case enRoute = "en_route"
-    case complete = "complete"
+    case pickingUp = "Picking Up"
+    case pickUp = "Pick Up"
+    case enRoute = "En Route"
+    case complete = "Complete"
     
     var color: String {
         switch self {
@@ -187,41 +187,162 @@ enum JobType: String, Codable, CaseIterable {
 // MARK: - Job Model
 struct Job: Identifiable, Codable {
     @DocumentID var id: String?
-    var clientName: String
-    var clientAddress: String
+    var jobNumber: String?
+    var doliNumber: String?
+    var storeCompany: String?
+    var clientName: String?
+    var clientAddress: String?
     var clientPhone: String?
-    var jobType: JobType
-    var jobDescription: String
-    var scheduledDate: Date
-    var scheduledTime: String // e.g., "9:00 AM"
-    var assignedEmployeeId: String
-    var assignedEmployeeName: String
+    var pickUpAddress: String?
+    var jobType: JobType?
+    var installType: String? // Raw string from Firebase
+    var jobDescription: String?
+    var items: String?
+    var scheduledDate: Date?
+    var scheduledTime: String? // e.g., "9:00 AM"
+    var timeFrame: String? // e.g., "08:00 - 12:00"
+    var assignedEmployeeId: String?
+    var assignedEmployeeName: String?
     var assignedTeamId: String?
     var assignedTeamName: String?
-    var status: JobStatus
+    var assignedTeamMembers: [String]?
+    var status: JobStatus?
     var notes: String?
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date?
+    var updatedAt: Date?
     var rescheduleRequest: RescheduleRequest?
-    
+
     enum CodingKeys: String, CodingKey {
         case id
-        case clientName
+        case jobNumber
+        case doliNumber = "dolibarrId"
+        case storeCompany
+        case clientName = "customerName"
         case clientAddress
-        case clientPhone
+        case clientPhone = "phoneNumber"
+        case pickUpAddress
         case jobType
-        case jobDescription
-        case scheduledDate
+        case installType
+        case items
+        case jobDescription = "description"
+        case scheduledDate = "installDate"
         case scheduledTime
+        case timeFrame
         case assignedEmployeeId
         case assignedEmployeeName
         case assignedTeamId
         case assignedTeamName
+        case assignedTeamMembers
         case status
         case notes
         case createdAt
         case updatedAt
         case rescheduleRequest
+    }
+
+    // Helper to get the install type as a string
+    var displayInstallType: String {
+        if let installType = installType {
+            return installType
+        }
+        return jobType?.rawValue ?? "N/A"
+    }
+
+    // Regular initializer
+    init(
+        id: String? = nil,
+        jobNumber: String? = nil,
+        doliNumber: String? = nil,
+        storeCompany: String? = nil,
+        clientName: String? = nil,
+        clientAddress: String? = nil,
+        clientPhone: String? = nil,
+        pickUpAddress: String? = nil,
+        jobType: JobType? = nil,
+        installType: String? = nil,
+        items: String? = nil,
+        jobDescription: String? = nil,
+        scheduledDate: Date? = nil,
+        scheduledTime: String? = nil,
+        timeFrame: String? = nil,
+        assignedEmployeeId: String? = nil,
+        assignedEmployeeName: String? = nil,
+        assignedTeamId: String? = nil,
+        assignedTeamName: String? = nil,
+        assignedTeamMembers: [String]? = nil,
+        status: JobStatus? = nil,
+        notes: String? = nil,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil,
+        rescheduleRequest: RescheduleRequest? = nil
+    ) {
+        self.id = id
+        self.jobNumber = jobNumber
+        self.doliNumber = doliNumber
+        self.storeCompany = storeCompany
+        self.clientName = clientName
+        self.clientAddress = clientAddress
+        self.clientPhone = clientPhone
+        self.pickUpAddress = pickUpAddress
+        self.jobType = jobType
+        self.installType = installType
+        self.items = items
+        self.jobDescription = jobDescription
+        self.scheduledDate = scheduledDate
+        self.scheduledTime = scheduledTime
+        self.timeFrame = timeFrame
+        self.assignedEmployeeId = assignedEmployeeId
+        self.assignedEmployeeName = assignedEmployeeName
+        self.assignedTeamId = assignedTeamId
+        self.assignedTeamName = assignedTeamName
+        self.assignedTeamMembers = assignedTeamMembers
+        self.status = status
+        self.notes = notes
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.rescheduleRequest = rescheduleRequest
+    }
+
+    // Custom decoder to handle date strings from Firebase
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        jobNumber = try container.decodeIfPresent(String.self, forKey: .jobNumber)
+        doliNumber = try container.decodeIfPresent(String.self, forKey: .doliNumber)
+        storeCompany = try container.decodeIfPresent(String.self, forKey: .storeCompany)
+        clientName = try container.decodeIfPresent(String.self, forKey: .clientName)
+        clientAddress = try container.decodeIfPresent(String.self, forKey: .clientAddress)
+        clientPhone = try container.decodeIfPresent(String.self, forKey: .clientPhone)
+        pickUpAddress = try container.decodeIfPresent(String.self, forKey: .pickUpAddress)
+        jobType = try container.decodeIfPresent(JobType.self, forKey: .jobType)
+        installType = try container.decodeIfPresent(String.self, forKey: .installType)
+        items = try container.decodeIfPresent(String.self, forKey: .items)
+        jobDescription = try container.decodeIfPresent(String.self, forKey: .jobDescription)
+
+        // Handle date - try as Date first, then as string
+        if let date = try? container.decodeIfPresent(Date.self, forKey: .scheduledDate) {
+            scheduledDate = date
+        } else if let dateString = try? container.decodeIfPresent(String.self, forKey: .scheduledDate) {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            scheduledDate = formatter.date(from: dateString)
+        } else {
+            scheduledDate = nil
+        }
+
+        scheduledTime = try container.decodeIfPresent(String.self, forKey: .scheduledTime)
+        timeFrame = try container.decodeIfPresent(String.self, forKey: .timeFrame)
+        assignedEmployeeId = try container.decodeIfPresent(String.self, forKey: .assignedEmployeeId)
+        assignedEmployeeName = try container.decodeIfPresent(String.self, forKey: .assignedEmployeeName)
+        assignedTeamId = try container.decodeIfPresent(String.self, forKey: .assignedTeamId)
+        assignedTeamName = try container.decodeIfPresent(String.self, forKey: .assignedTeamName)
+        assignedTeamMembers = try container.decodeIfPresent([String].self, forKey: .assignedTeamMembers)
+        status = try container.decodeIfPresent(JobStatus.self, forKey: .status)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        rescheduleRequest = try container.decodeIfPresent(RescheduleRequest.self, forKey: .rescheduleRequest)
     }
 }
 

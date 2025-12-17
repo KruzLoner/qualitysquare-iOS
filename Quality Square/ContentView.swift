@@ -22,7 +22,7 @@ struct ContentView: View {
             } else {
                 // Login Screen
                 LoginView()
-            }
+	            }
         }
         .animation(.easeInOut, value: authManager.isAuthenticated)
     }

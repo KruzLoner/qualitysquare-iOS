@@ -154,13 +154,21 @@ class FirestoreManager: ObservableObject {
                         return
                     }
 
-                    let jobs = documents.compactMap { doc -> Job? in
+                    let decodedJobs = documents.compactMap { doc -> Job? in
                         self.decodeJob(for: employeeId, teamIds: teamIds, document: doc)
                     }
-                    .filter { job in
-                        job.scheduledDate >= startOfDay && job.scheduledDate < endOfDay
+
+                    let filteredJobs = decodedJobs.filter { job in
+                        guard let scheduledDate = job.scheduledDate else { return false }
+                        return scheduledDate >= startOfDay && scheduledDate < endOfDay
                     }
-                    .sorted { $0.scheduledDate < $1.scheduledDate }
+
+                    let jobs = filteredJobs.sorted { job1, job2 in
+                        guard let date1 = job1.scheduledDate, let date2 = job2.scheduledDate else {
+                            return false
+                        }
+                        return date1 < date2
+                    }
 
                     completion(.success(jobs))
                 }
@@ -182,10 +190,16 @@ class FirestoreManager: ObservableObject {
                         return
                     }
 
-                    let jobs = documents.compactMap { doc -> Job? in
+                    let decodedJobs = documents.compactMap { doc -> Job? in
                         self.decodeJob(for: employeeId, teamIds: teamIds, document: doc)
                     }
-                    .sorted { $0.scheduledDate > $1.scheduledDate }
+
+                    let jobs = decodedJobs.sorted { job1, job2 in
+                        guard let date1 = job1.scheduledDate, let date2 = job2.scheduledDate else {
+                            return false
+                        }
+                        return date1 > date2
+                    }
 
                     completion(.success(jobs))
                 }
@@ -210,23 +224,90 @@ class FirestoreManager: ObservableObject {
                     return
                 }
                 
-                let jobs = documents.compactMap { doc -> Job? in
+                let decodedJobs = documents.compactMap { doc -> Job? in
                     self.decodeJobForAdmin(document: doc)
                 }
-                .filter { job in
-                    job.scheduledDate >= startOfDay && job.scheduledDate < endOfDay
+
+                let filteredJobs = decodedJobs.filter { job in
+                    guard let scheduledDate = job.scheduledDate else { return false }
+                    return scheduledDate >= startOfDay && scheduledDate < endOfDay
                 }
-                .sorted { $0.scheduledDate < $1.scheduledDate }
-                
+
+                let jobs = filteredJobs.sorted { job1, job2 in
+                    guard let date1 = job1.scheduledDate, let date2 = job2.scheduledDate else {
+                        return false
+                    }
+                    return date1 < date2
+                }
+
                 completion(.success(jobs))
             }
     }
     
+    func getPendingRescheduleRequests(completion: @escaping (Result<[Job], Error>) -> Void) {
+        db.collection("jobs")
+            .limit(to: 300)
+            .getDocuments { snapshot, error in
+                if let error = error {
+                    completion(.failure(error))
+                    return
+                }
+
+                guard let documents = snapshot?.documents else {
+                    completion(.success([]))
+                    return
+                }
+
+                let decodedJobs = documents.compactMap { doc -> Job? in
+                    self.decodeJobForAdmin(document: doc)
+                }
+
+                let pending = decodedJobs.filter {
+                    if let req = $0.rescheduleRequest {
+                        return req.isApproved == nil
+                    }
+                    return false
+                }
+
+                let sorted = pending.sorted {
+                    let d1 = $0.rescheduleRequest?.newProposedDate ?? $0.rescheduleRequest?.requestedDate ?? Date.distantFuture
+                    let d2 = $1.rescheduleRequest?.newProposedDate ?? $1.rescheduleRequest?.requestedDate ?? Date.distantFuture
+                    return d1 < d2
+                }
+
+                completion(.success(sorted))
+            }
+    }
+    
     func updateJobStatus(jobId: String, status: JobStatus, completion: @escaping (Result<Void, Error>) -> Void) {
+        let now = Timestamp(date: Date())
         db.collection("jobs").document(jobId).updateData([
             "status": status.rawValue,
-            "updatedAt": Timestamp(date: Date())
+            "requests.status": status.rawValue,
+            "updatedAt": now
         ]) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+    
+    func approveReschedule(jobId: String, newDate: Date?, completion: @escaping (Result<Void, Error>) -> Void) {
+        var updateData: [String: Any] = [
+            "status": JobStatus.rescheduled.rawValue,
+            "requests.status": JobStatus.rescheduled.rawValue,
+            "requests.reschedule.isApproved": true,
+            "updatedAt": Timestamp(date: Date())
+        ]
+        
+        if let date = newDate {
+            updateData["installDate"] = Timestamp(date: date)
+            updateData["requests.reschedule.newProposedDate"] = Timestamp(date: date)
+        }
+        
+        db.collection("jobs").document(jobId).updateData(updateData) { error in
             if let error = error {
                 completion(.failure(error))
             } else {
@@ -245,15 +326,14 @@ class FirestoreManager: ObservableObject {
         )
         
         var updateData: [String: Any] = [
-            "rescheduleRequest.requestedBy": request.requestedBy,
-            "rescheduleRequest.requestedDate": Timestamp(date: request.requestedDate),
-            "rescheduleRequest.reason": request.reason,
-            "status": JobStatus.rescheduled.rawValue,
+            "requests.reschedule.requestedBy": request.requestedBy,
+            "requests.reschedule.requestedDate": Timestamp(date: request.requestedDate),
+            "requests.reschedule.reason": request.reason,
             "updatedAt": Timestamp(date: Date())
         ]
         
         if let newDate = newDate {
-            updateData["rescheduleRequest.newProposedDate"] = Timestamp(date: newDate)
+            updateData["requests.reschedule.newProposedDate"] = Timestamp(date: newDate)
         }
         
         db.collection("jobs").document(jobId).updateData(updateData) { error in
@@ -521,6 +601,7 @@ class FirestoreManager: ObservableObject {
     // Decode flexible job schema (supports team assignments)
     private func decodeJob(for employeeId: String, teamIds: Set<String>, document: QueryDocumentSnapshot) -> Job? {
         let data = document.data()
+        let requestData = data["requests"] as? [String: Any]
 
         let assignments = data["assignments"] as? [[String: Any]] ?? []
         var matchesEmployee = false
@@ -529,6 +610,7 @@ class FirestoreManager: ObservableObject {
         var assignedTeamId: String?
         var assignedTeamName: String?
         var scheduledDate: Date?
+        var teamMembers: [String]?
 
         for assignment in assignments {
             let type = assignment["type"] as? String ?? ""
@@ -538,66 +620,110 @@ class FirestoreManager: ObservableObject {
                 assignedEmployeeName = assignment["employeeName"] as? String
                 if let ts = assignment["date"] as? Timestamp {
                     scheduledDate = ts.dateValue()
+                } else if let dateString = assignment["date"] as? String {
+                    scheduledDate = parseDate(from: dateString)
                 }
             } else if type == "team", let tid = assignment["teamId"] as? String, teamIds.contains(tid) {
                 matchesEmployee = true
                 assignedTeamId = tid
                 assignedTeamName = assignment["teamName"] as? String
+                if let members = assignment["teamMembers"] as? [String] {
+                    teamMembers = members
+                }
                 if let ts = assignment["date"] as? Timestamp {
                     scheduledDate = ts.dateValue()
+                } else if let dateString = assignment["date"] as? String {
+                    scheduledDate = parseDate(from: dateString)
                 }
             }
         }
 
         guard matchesEmployee else { return nil }
 
+        var job = (try? document.data(as: Job.self)) ?? Job()
+        job.id = document.documentID
+
+        let cleanString: (String?) -> String? = { value in
+            guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+                return nil
+            }
+            return trimmed
+        }
+
         // Fallbacks for schedule
-        if scheduledDate == nil, let ts = data["installDate"] as? Timestamp {
-            scheduledDate = ts.dateValue()
+        if scheduledDate == nil {
+            scheduledDate = extractScheduledDate(from: data)
         }
-        if scheduledDate == nil, let ts = data["date"] as? Timestamp {
-            scheduledDate = ts.dateValue()
+        job.scheduledDate = scheduledDate ?? job.scheduledDate
+        if job.scheduledTime == nil, let scheduled = job.scheduledDate {
+            let timeFormatter = DateFormatter()
+            timeFormatter.timeStyle = .short
+            job.scheduledTime = timeFormatter.string(from: scheduled)
         }
-        let scheduled = scheduledDate ?? Date()
-        let timeFormatter = DateFormatter()
-        timeFormatter.timeStyle = .short
-        let scheduledTime = timeFormatter.string(from: scheduled)
 
-        let clientName = (data["customerName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? (data["jobNumber"] as? String).map { "Job \($0)" }
-            ?? "Job"
-        let clientAddress = (data["address"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? (data["location"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? "Address not set"
+        // Populate fields the employee view relies on
+        if job.timeFrame == nil || job.timeFrame?.isEmpty == true {
+            job.timeFrame = cleanString(requestData?["timeFrame"] as? String) ?? cleanString(data["timeFrame"] as? String)
+        }
 
-        let jobStatusRaw = data["status"] as? String ?? ""
-        let jobStatus = mapStatus(from: jobStatusRaw)
+        if job.storeCompany == nil || job.storeCompany?.isEmpty == true {
+            job.storeCompany = cleanString(requestData?["storeCompany"] as? String) ?? cleanString(data["storeCompany"] as? String)
+        }
 
-        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
-        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+        if job.pickUpAddress == nil || job.pickUpAddress?.isEmpty == true {
+            job.pickUpAddress = cleanString(data["pickUpAddress"] as? String ?? data["pickupAddress"] as? String)
+        }
 
-        return Job(
-            id: document.documentID,
-            clientName: clientName,
-            clientAddress: clientAddress,
-            clientPhone: data["phoneNumber"] as? String,
-            jobType: .other,
-            jobDescription: data["description"] as? String ?? "",
-            scheduledDate: scheduled,
-            scheduledTime: scheduledTime,
-            assignedEmployeeId: assignedEmployeeId ?? (assignedTeamId ?? "unassigned"),
-            assignedEmployeeName: assignedEmployeeName ?? assignedTeamName ?? "Team Job",
-            status: jobStatus,
-            notes: data["notes"] as? String,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            rescheduleRequest: nil
-        )
+        if job.installType == nil || job.installType?.isEmpty == true {
+            job.installType = cleanString(data["installType"] as? String)
+        }
+
+        if job.doliNumber == nil || job.doliNumber?.isEmpty == true {
+            job.doliNumber = cleanString(data["dolibarrId"] as? String ?? data["doliNumber"] as? String)
+        }
+
+        if job.items == nil || job.items?.isEmpty == true {
+            if let list = data["items"] as? [String] {
+                job.items = list.joined(separator: ", ")
+            } else {
+                job.items = cleanString(data["items"] as? String ?? data["item"] as? String)
+            }
+        }
+
+        if job.assignedTeamMembers == nil || job.assignedTeamMembers?.isEmpty == true {
+            job.assignedTeamMembers = teamMembers ?? data["teamMembers"] as? [String]
+        }
+
+        if job.clientName == nil {
+            job.clientName = cleanString(data["customerName"] as? String) ?? cleanString(job.jobNumber)
+        }
+
+        if job.clientAddress == nil || job.clientAddress?.isEmpty == true {
+            job.clientAddress = cleanString(data["clientAddress"] as? String)
+                ?? cleanString(data["address"] as? String)
+                ?? cleanString(data["location"] as? String)
+        }
+
+        if job.clientPhone == nil {
+            job.clientPhone = cleanString(data["phoneNumber"] as? String)
+        }
+
+        let jobStatusRaw = cleanString(requestData?["status"] as? String) ?? cleanString(data["status"] as? String) ?? job.status?.rawValue ?? ""
+        job.status = mapStatus(from: jobStatusRaw)
+
+        job.assignedEmployeeId = assignedEmployeeId ?? job.assignedEmployeeId ?? (assignedTeamId ?? "unassigned")
+        job.assignedEmployeeName = assignedEmployeeName ?? job.assignedEmployeeName ?? assignedTeamName ?? "Team Job"
+        job.assignedTeamId = assignedTeamId ?? job.assignedTeamId
+        job.assignedTeamName = assignedTeamName ?? job.assignedTeamName
+        job.assignedTeamMembers = job.assignedTeamMembers ?? teamMembers
+
+        return job
     }
 
     // Decode for admin (no membership filtering)
     private func decodeJobForAdmin(document: QueryDocumentSnapshot) -> Job? {
         let data = document.data()
+        let requestData = data["requests"] as? [String: Any]
 
         let assignments = data["assignments"] as? [[String: Any]] ?? []
         var assignedEmployeeId: String?
@@ -605,41 +731,95 @@ class FirestoreManager: ObservableObject {
         var assignedTeamId: String?
         var assignedTeamName: String?
         var scheduledDate: Date?
+        var teamMembers: [String]?
 
         if let firstAssignment = assignments.first {
             assignedEmployeeId = firstAssignment["employeeId"] as? String
             assignedEmployeeName = firstAssignment["employeeName"] as? String
             assignedTeamId = firstAssignment["teamId"] as? String
             assignedTeamName = firstAssignment["teamName"] as? String
+            if let members = firstAssignment["teamMembers"] as? [String] {
+                teamMembers = members
+            }
             if let ts = firstAssignment["date"] as? Timestamp {
                 scheduledDate = ts.dateValue()
+            } else if let dateString = firstAssignment["date"] as? String {
+                scheduledDate = parseDate(from: dateString)
             }
         }
 
+        var job = (try? document.data(as: Job.self)) ?? Job()
+        job.id = document.documentID
+
+        let cleanString: (String?) -> String? = { value in
+            guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+                return nil
+            }
+            return trimmed
+        }
+
         // Fallbacks for schedule
-        if scheduledDate == nil, let ts = data["installDate"] as? Timestamp {
-            scheduledDate = ts.dateValue()
+        if scheduledDate == nil {
+            scheduledDate = extractScheduledDate(from: data)
         }
-        if scheduledDate == nil, let ts = data["date"] as? Timestamp {
-            scheduledDate = ts.dateValue()
+        job.scheduledDate = scheduledDate ?? job.scheduledDate
+        if job.scheduledTime == nil, let scheduled = job.scheduledDate {
+            let timeFormatter = DateFormatter()
+            timeFormatter.timeStyle = .short
+            job.scheduledTime = timeFormatter.string(from: scheduled)
         }
-        let scheduled = scheduledDate ?? Date()
-        let timeFormatter = DateFormatter()
-        timeFormatter.timeStyle = .short
-        let scheduledTime = timeFormatter.string(from: scheduled)
 
-        let clientName = (data["customerName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? (data["jobNumber"] as? String).map { "Job \($0)" }
-            ?? "Job"
-        let clientAddress = (data["address"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? (data["location"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? "Address not set"
+        if job.timeFrame == nil || job.timeFrame?.isEmpty == true {
+            job.timeFrame = cleanString(requestData?["timeFrame"] as? String) ?? cleanString(data["timeFrame"] as? String)
+        }
 
-        let jobStatusRaw = data["status"] as? String ?? ""
-        let jobStatus = mapStatus(from: jobStatusRaw)
+        if job.storeCompany == nil || job.storeCompany?.isEmpty == true {
+            job.storeCompany = cleanString(requestData?["storeCompany"] as? String) ?? cleanString(data["storeCompany"] as? String)
+        }
 
-        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
-        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+        if job.pickUpAddress == nil || job.pickUpAddress?.isEmpty == true {
+            job.pickUpAddress = cleanString(data["pickUpAddress"] as? String ?? data["pickupAddress"] as? String)
+        }
+
+        if job.installType == nil || job.installType?.isEmpty == true {
+            job.installType = cleanString(data["installType"] as? String)
+        }
+
+        if job.doliNumber == nil || job.doliNumber?.isEmpty == true {
+            job.doliNumber = cleanString(data["dolibarrId"] as? String ?? data["doliNumber"] as? String)
+        }
+
+        if job.items == nil || job.items?.isEmpty == true {
+            if let list = data["items"] as? [String] {
+                job.items = list.joined(separator: ", ")
+            } else {
+                job.items = cleanString(data["items"] as? String ?? data["item"] as? String)
+            }
+        }
+
+        if job.assignedTeamMembers == nil || job.assignedTeamMembers?.isEmpty == true {
+            job.assignedTeamMembers = teamMembers ?? data["teamMembers"] as? [String]
+        }
+
+        if job.clientName == nil {
+            job.clientName = cleanString(data["customerName"] as? String) ?? cleanString(job.jobNumber)
+        }
+
+        if job.clientAddress == nil || job.clientAddress?.isEmpty == true {
+            job.clientAddress = cleanString(data["clientAddress"] as? String)
+                ?? cleanString(data["address"] as? String)
+                ?? cleanString(data["location"] as? String)
+        }
+
+        if job.clientPhone == nil {
+            job.clientPhone = cleanString(data["phoneNumber"] as? String)
+        }
+
+        let jobStatusRaw = cleanString(requestData?["status"] as? String) ?? cleanString(data["status"] as? String) ?? job.status?.rawValue ?? ""
+        job.status = mapStatus(from: jobStatusRaw)
+
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
+        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue()
 
         var reschedule: RescheduleRequest?
         if let rescheduleData = data["rescheduleRequest"] as? [String: Any] {
@@ -649,31 +829,56 @@ class FirestoreManager: ObservableObject {
             let newDate = (rescheduleData["newProposedDate"] as? Timestamp)?.dateValue()
             let approved = rescheduleData["isApproved"] as? Bool
             reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved)
+        } else if let rescheduleData = requestData?["reschedule"] as? [String: Any] {
+            let reason = rescheduleData["reason"] as? String ?? ""
+            let requestedBy = rescheduleData["requestedBy"] as? String ?? ""
+            let requestedDate = (rescheduleData["requestedDate"] as? Timestamp)?.dateValue() ?? Date()
+            let newDate = (rescheduleData["newProposedDate"] as? Timestamp)?.dateValue()
+            let approved = rescheduleData["isApproved"] as? Bool
+            reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved)
         }
 
-        return Job(
-            id: document.documentID,
-            clientName: clientName,
-            clientAddress: clientAddress,
-            clientPhone: data["phoneNumber"] as? String,
-            jobType: .other,
-            jobDescription: data["description"] as? String ?? "",
-            scheduledDate: scheduled,
-            scheduledTime: scheduledTime,
-            assignedEmployeeId: assignedEmployeeId ?? (assignedTeamId ?? "unassigned"),
-            assignedEmployeeName: assignedEmployeeName ?? assignedTeamName ?? "Team Job",
-            assignedTeamId: assignedTeamId,
-            assignedTeamName: assignedTeamName,
-            status: jobStatus,
-            notes: data["notes"] as? String,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            rescheduleRequest: reschedule
-        )
+        job.createdAt = createdAt ?? job.createdAt
+        job.updatedAt = updatedAt ?? job.updatedAt
+        job.rescheduleRequest = reschedule ?? job.rescheduleRequest
+        job.assignedEmployeeId = assignedEmployeeId ?? job.assignedEmployeeId ?? (assignedTeamId ?? "unassigned")
+        job.assignedEmployeeName = assignedEmployeeName ?? job.assignedEmployeeName ?? assignedTeamName ?? "Team Job"
+        job.assignedTeamId = assignedTeamId ?? job.assignedTeamId
+        job.assignedTeamName = assignedTeamName ?? job.assignedTeamName
+        job.assignedTeamMembers = job.assignedTeamMembers ?? teamMembers
+
+        return job
+    }
+
+    // MARK: - Job decoding helpers
+    private func parseDate(from string: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: string)
+    }
+
+    private func extractScheduledDate(from data: [String: Any]) -> Date? {
+        if let ts = data["installDate"] as? Timestamp {
+            return ts.dateValue()
+        }
+        if let dateString = data["installDate"] as? String, let parsed = parseDate(from: dateString) {
+            return parsed
+        }
+        if let ts = data["date"] as? Timestamp {
+            return ts.dateValue()
+        }
+        if let dateString = data["date"] as? String, let parsed = parseDate(from: dateString) {
+            return parsed
+        }
+        return nil
     }
 
     private func mapStatus(from raw: String) -> JobStatus {
-        switch raw.lowercased() {
+        let normalized = raw.lowercased().replacingOccurrences(of: " ", with: "_")
+        switch normalized {
         case "completed": return .completed
         case "complete": return .complete
         case "picking_up": return .pickingUp
@@ -681,7 +886,7 @@ class FirestoreManager: ObservableObject {
         case "en_route": return .enRoute
         case "cancelled": return .cancelled
         case "rescheduled": return .rescheduled
-        case "in_progress", "picking_up", "delivering", "started": return .inProgress
+        case "in_progress", "delivering", "started": return .inProgress
         default: return .scheduled
         }
     }

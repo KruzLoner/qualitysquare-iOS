@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct JobDetailView: View {
     let job: Job
@@ -13,14 +14,36 @@ struct JobDetailView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     
     @State private var showingRescheduleRequest = false
-    @State private var selectedStatus: JobStatus
+    @State private var selectedStatus: JobStatus?
     @State private var isUpdating = false
     @State private var successMessage: String?
     @State private var errorMessage: String?
-    
+
     init(job: Job) {
         self.job = job
         _selectedStatus = State(initialValue: job.status)
+    }
+
+    private var isAdmin: Bool {
+        authManager.userRole == .admin
+    }
+
+    private var identifierText: String? {
+        if let doli = job.doliNumber, !doli.isEmpty {
+            return "Dolibarr: \(doli)"
+        }
+        if let jobNumber = job.jobNumber, !jobNumber.isEmpty {
+            return "Job: #\(jobNumber)"
+        }
+        return nil
+    }
+
+    private var itemsList: [String] {
+        let raw = job.items ?? ""
+        return raw
+            .components(separatedBy: CharacterSet(charactersIn: ",\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
     
     var body: some View {
@@ -30,53 +53,15 @@ struct JobDetailView: View {
             
             ScrollView {
                 VStack(spacing: 20) {
-                    // Client Info Card
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.title)
-                                .foregroundColor(.blue.opacity(0.7))
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(job.clientName)
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                                
-                                if let phone = job.clientPhone {
-                                    Text(phone)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            Spacer()
-                        }
-                        
-                        Divider()
-                        
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label {
-                                Text(job.clientAddress)
-                                    .font(.subheadline)
-                            } icon: {
-                                Image(systemName: "location.fill")
-                                    .foregroundColor(.blue.opacity(0.7))
-                            }
-                            
-                            Label {
-                                Text("\(formatDate(job.scheduledDate)) at \(job.scheduledTime)")
-                                    .font(.subheadline)
-                            } icon: {
-                                Image(systemName: "calendar")
-                                    .foregroundColor(.blue.opacity(0.7))
-                            }
-                            
-                            Label {
-                                Text(job.jobType.rawValue)
-                                    .font(.subheadline)
-                            } icon: {
-                                Image(systemName: "tag.fill")
-                                    .foregroundColor(.blue.opacity(0.7))
+                    // Summary Card
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(job.clientName ?? "Customer")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                            Divider()
+                            if let id = identifierText {
+                                InfoRow(label: "Dolibarr", value: id.replacingOccurrences(of: "Dolibarr: ", with: ""), allowWrap: true, labelWidth: 170)
                             }
                         }
                     }
@@ -87,25 +72,131 @@ struct JobDetailView: View {
                     )
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
-                    
-                    // Job Description Card
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Job Description")
-                            .font(.headline)
-                        
-                        Text(job.jobDescription)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+
+                    // Key Info
+                    VStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Schedule")
+                                .font(.headline)
+                            Divider()
+                            if let installDate = job.scheduledDate {
+                                InfoRow(label: "Date", value: formatDate(installDate))
+                            } else {
+                                InfoRow(label: "Date", value: "N/A")
+                            }
+                            InfoRow(label: "Time Frame", value: job.timeFrame ?? job.scheduledTime ?? "N/A")
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(.ultraThinMaterial)
+                        )
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Store & Item")
+                                .font(.headline)
+                            Divider()
+                            InfoRow(label: "Store", value: job.storeCompany ?? "N/A")
+                            InfoRow(label: "Install Type", value: job.displayInstallType)
+                            if itemsList.isEmpty {
+                                InfoRow(label: "Items", value: "N/A", allowWrap: true, labelWidth: 80)
+                            } else {
+                                ItemsRow(label: "Items", items: itemsList, labelWidth: 80)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(.ultraThinMaterial)
+                        )
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+
+                    // Locations
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Locations")
+                            .font(.headline)
+                        Divider()
+                        InfoRow(label: "Pick Up", value: job.pickUpAddress ?? "N/A")
+                        InfoRow(label: "Customer", value: job.clientAddress ?? "N/A")
+                    }
                     .padding(20)
                     .background(
                         RoundedRectangle(cornerRadius: 16)
                             .fill(.ultraThinMaterial)
                     )
                     .padding(.horizontal, 20)
-                    
-                    // Notes Card (if any)
+
+                    // Contact
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Contact")
+                            .font(.headline)
+                        Divider()
+
+                        InfoRow(label: "Phone", value: job.clientPhone ?? "N/A")
+                        if let phone = job.clientPhone, !phone.isEmpty {
+                            HStack(spacing: 10) {
+                                Button {
+                                    if let url = URL(string: "tel://\(phone.filter { !$0.isWhitespace })") {
+                                        UIApplication.shared.open(url)
+                                    }
+                                } label: {
+                                    Label("Call", systemImage: "phone.fill")
+                                        .font(.caption)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .fill(.thinMaterial)
+                                        )
+                                }
+
+                                Button {
+                                    if let url = URL(string: "sms://\(phone.filter { !$0.isWhitespace })") {
+                                        UIApplication.shared.open(url)
+                                    }
+                                } label: {
+                                    Label("Text", systemImage: "message.fill")
+                                        .font(.caption)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .fill(.thinMaterial)
+                                        )
+                                }
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(.ultraThinMaterial)
+                    )
+                    .padding(.horizontal, 20)
+
+                    // Description
+                    if let description = job.jobDescription, !description.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Job Description")
+                                .font(.headline)
+
+                            Text(description)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(20)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(.ultraThinMaterial)
+                        )
+                        .padding(.horizontal, 20)
+                    }
+
+                    // Notes
                     if let notes = job.notes, !notes.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("Notes", systemImage: "note.text")
@@ -130,13 +221,17 @@ struct JobDetailView: View {
                             Text("Status")
                                 .font(.headline)
                             Spacer()
-                            JobStatusBadge(status: selectedStatus)
+                            if let status = selectedStatus {
+                                JobStatusBadge(status: status)
+                            }
                         }
                         
-                        StatusProgressView(
-                            steps: workflowStatuses,
-                            currentStatus: selectedStatus
-                        )
+                        if let status = selectedStatus {
+                            StatusProgressView(
+                                steps: workflowStatuses,
+                                currentStatus: status
+                            )
+                        }
                     }
                     .padding(20)
                     .background(
@@ -162,7 +257,7 @@ struct JobDetailView: View {
                                 }
                                 
                                 if let approved = reschedule.isApproved {
-                                    Text(approved ? "✓ Approved" : "✗ Declined")
+                                    Text(approved ? "Approved" : "Declined")
                                         .font(.subheadline)
                                         .fontWeight(.medium)
                                         .foregroundColor(approved ? .green : .red)
@@ -212,38 +307,40 @@ struct JobDetailView: View {
                         .padding(.horizontal, 20)
                     }
                     
-                    // Action Buttons
-                    VStack(spacing: 12) {
-                        Button(action: advanceStatus) {
-                            Label(nextStatusButtonTitle, systemImage: "arrow.triangle.2.circlepath")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(canAdvance ? Color.blue.opacity(0.9) : Color.gray.opacity(0.4))
-                                )
-                                .foregroundColor(.white)
+                    // Action Buttons (employees only)
+                    if !isAdmin {
+                        VStack(spacing: 12) {
+                            Button(action: advanceStatus) {
+                                Label(nextStatusButtonTitle, systemImage: "arrow.triangle.2.circlepath")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(canAdvance ? Color.blue.opacity(0.9) : Color.gray.opacity(0.4))
+                                    )
+                                    .foregroundColor(.white)
+                            }
+                            .disabled(!canAdvance || isUpdating)
+                            
+                            Button(action: { showingRescheduleRequest = true }) {
+                                Label("Request Reschedule", systemImage: "calendar.badge.clock")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(.ultraThinMaterial)
+                                    )
+                                    .foregroundColor(.primary)
+                            }
+                            .disabled(isUpdating || job.status == .completed || job.status == nil)
                         }
-                        .disabled(!canAdvance || isUpdating)
-                        
-                        Button(action: { showingRescheduleRequest = true }) {
-                            Label("Request Reschedule", systemImage: "calendar.badge.clock")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(.ultraThinMaterial)
-                                )
-                                .foregroundColor(.primary)
-                        }
-                        .disabled(isUpdating || job.status == .completed)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
                     
                     Spacer()
                         .frame(height: 40)
@@ -266,10 +363,11 @@ struct JobDetailView: View {
     }
     
     private var nextStatus: JobStatus? {
-        if selectedStatus == .complete || selectedStatus == .completed {
+        guard let status = selectedStatus else { return nil }
+        if status == .complete || status == .completed {
             return nil
         }
-        guard let idx = workflowStatuses.firstIndex(of: selectedStatus) else {
+        guard let idx = workflowStatuses.firstIndex(of: status) else {
             return workflowStatuses.first
         }
         let nextIndex = workflowStatuses.index(after: idx)
@@ -312,16 +410,16 @@ struct JobDetailView: View {
     }
     
     private func updateStatus() {
-        guard let jobId = job.id else { return }
-        
+        guard let jobId = job.id, let status = selectedStatus else { return }
+
         isUpdating = true
         errorMessage = nil
         successMessage = nil
-        
-        firestoreManager.updateJobStatus(jobId: jobId, status: selectedStatus) { result in
+
+        firestoreManager.updateJobStatus(jobId: jobId, status: status) { result in
             DispatchQueue.main.async {
                 isUpdating = false
-                
+
                 switch result {
                 case .success:
                     successMessage = "Status updated successfully"
@@ -364,6 +462,86 @@ struct JobDetailView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Info Row Component
+private struct InfoRow: View {
+    let label: String
+    let value: String
+    var allowWrap: Bool = false
+    var labelWidth: CGFloat = 110
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+                .frame(width: labelWidth, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+
+            Text(value)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(allowWrap ? nil : 1)
+                .allowsTightening(!allowWrap)
+                .minimumScaleFactor(allowWrap ? 1.0 : 0.95)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+        }
+    }
+}
+
+private struct ItemsRow: View {
+    let label: String
+    let items: [String]
+    var labelWidth: CGFloat = 110
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(items.indices, id: \.self) { idx in
+                    Text("• \(items[idx])")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+        }
+    }
+}
+
+// MARK: - Pill
+private struct PillView: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption)
+            Text(text)
+                .font(.caption)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.thinMaterial)
+        )
     }
 }
 

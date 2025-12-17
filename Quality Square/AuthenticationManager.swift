@@ -20,18 +20,66 @@ class AuthenticationManager: ObservableObject {
     @Published var currentUser: User?
     @Published var errorMessage: String?
     @Published var isLoading = false
-    
+
     private let db = Firestore.firestore()
-    
+    private let defaults = UserDefaults.standard
+
+    // UserDefaults keys
+    private let rememberAdminKey = "rememberAdmin"
+    private let adminEmailKey = "adminEmail"
+    private let adminPasswordKey = "adminPassword"
+    private let rememberEmployeeKey = "rememberEmployee"
+    private let employeePinKey = "employeePin"
+
     struct User {
         let id: String
         let email: String?
         let role: UserRole
         let name: String?
     }
-    
+
     init() {
         checkAuthStatus()
+    }
+
+    // MARK: - Remember Me Functions
+    func saveAdminCredentials(email: String, password: String, remember: Bool) {
+        defaults.set(remember, forKey: rememberAdminKey)
+        if remember {
+            defaults.set(email, forKey: adminEmailKey)
+            defaults.set(password, forKey: adminPasswordKey)
+        } else {
+            defaults.removeObject(forKey: adminEmailKey)
+            defaults.removeObject(forKey: adminPasswordKey)
+        }
+    }
+
+    func getSavedAdminCredentials() -> (email: String, password: String, remember: Bool)? {
+        let remember = defaults.bool(forKey: rememberAdminKey)
+        guard remember,
+              let email = defaults.string(forKey: adminEmailKey),
+              let password = defaults.string(forKey: adminPasswordKey) else {
+            return nil
+        }
+        return (email, password, remember)
+    }
+
+    func saveEmployeePin(pin: String, remember: Bool) {
+        defaults.set(remember, forKey: rememberEmployeeKey)
+        if remember {
+            defaults.set(pin, forKey: employeePinKey)
+        } else {
+            defaults.removeObject(forKey: employeePinKey)
+        }
+    }
+
+    func getSavedEmployeePin() -> (pin: String, remember: Bool)? {
+        let remember = defaults.bool(forKey: rememberEmployeeKey)
+        guard remember,
+              let pin = defaults.string(forKey: employeePinKey) else {
+            return nil
+        }
+        return (pin, remember)
     }
     
     func checkAuthStatus() {
@@ -145,6 +193,13 @@ class AuthenticationManager: ObservableObject {
         do {
             try Auth.auth().signOut()
             DispatchQueue.main.async {
+                // Clear any remembered credentials to prevent auto-login loops
+                self.defaults.removeObject(forKey: self.rememberAdminKey)
+                self.defaults.removeObject(forKey: self.adminEmailKey)
+                self.defaults.removeObject(forKey: self.adminPasswordKey)
+                self.defaults.removeObject(forKey: self.rememberEmployeeKey)
+                self.defaults.removeObject(forKey: self.employeePinKey)
+
                 self.isAuthenticated = false
                 self.userRole = nil
                 self.currentUser = nil

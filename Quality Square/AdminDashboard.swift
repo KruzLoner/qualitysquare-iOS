@@ -24,15 +24,35 @@ struct AdminDashboard: View {
     @State private var selectedTab = 0
     @State private var selectedJobFilter: JobStatus? = nil
     @State private var errorMessage: String?
-
-    private var rescheduleRequests: [Job] {
-        todayJobs.filter { $0.rescheduleRequest != nil }
-    }
+    @State private var pendingReschedules: [Job] = []
+    @State private var approvingJobIds: Set<String> = []
 
     private var inProgressCount: Int {
         todayJobs.filter { job in
             [.inProgress, .pickingUp, .pickUp, .enRoute].contains(job.status)
         }.count
+    }
+
+    private func approveReschedule(job: Job, newDate: Date?) {
+        guard let jobId = job.id else { return }
+        approvingJobIds.insert(jobId)
+        firestoreManager.approveReschedule(jobId: jobId, newDate: newDate) { result in
+            DispatchQueue.main.async {
+                approvingJobIds.remove(jobId)
+                switch result {
+                case .success:
+                    pendingReschedules.removeAll { $0.id == jobId }
+                    // Refresh jobs to reflect new status/date
+                    firestoreManager.getAllJobsForToday { jobsResult in
+                        if case let .success(jobs) = jobsResult {
+                            todayJobs = jobs
+                        }
+                    }
+                case .failure(let error):
+                    errorMessage = "Failed to approve: \(error.localizedDescription)"
+                }
+            }
+        }
     }
     
     private var activeJobs: [Job] {
@@ -68,7 +88,7 @@ struct AdminDashboard: View {
     }
 
     private var groupedJobs: [JobStatus: [Job]] {
-        Dictionary(grouping: filteredTodayJobs, by: { $0.status })
+        Dictionary(grouping: filteredTodayJobs.filter { $0.status != nil }, by: { $0.status! })
     }
 
     private var jobFilters: [JobStatus] {
@@ -149,22 +169,39 @@ struct AdminDashboard: View {
                         // Today's Attendance Tab
                         ScrollView {
                             VStack(spacing: 20) {
-                                // Stats Cards
-                                HStack(spacing: 12) {
-                                    StatCard(
-                                        title: "Currently Clocked In",
-                                        value: "\(clockRecords.count)",
-                                        icon: "person.2.fill",
-                                        color: .green
-                                    )
+                                // Combined Stats Card
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack {
+                                        Image(systemName: "person.2.fill")
+                                            .foregroundColor(.green.opacity(0.7))
+                                        Spacer()
+                                    }
 
-                                    StatCard(
-                                        title: "Total Employees",
-                                        value: "\(allEmployees.count)",
-                                        icon: "person.3.fill",
-                                        color: .blue
-                                    )
+                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                        Text("\(clockRecords.count)")
+                                            .font(.system(size: 40, weight: .bold))
+                                            .foregroundColor(.green)
+
+                                        Text("/")
+                                            .font(.title)
+                                            .foregroundColor(.secondary)
+
+                                        Text("\(allEmployees.count)")
+                                            .font(.title)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.primary)
+                                    }
+
+                                    Text("Clocked In / Total Employees")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
                                 }
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(.ultraThinMaterial)
+                                )
                                 .padding(.horizontal, 20)
                                 .padding(.top, 8)
 
@@ -224,12 +261,12 @@ struct AdminDashboard: View {
                                         .padding(.horizontal, 20)
                                     }
 
-                                    if filteredTodayJobs.isEmpty {
-                                        EmptyStateView(
-                                            icon: "calendar.badge.clock",
-                                            message: "No jobs scheduled for today"
-                                        )
-                                    } else {
+                                        if filteredTodayJobs.isEmpty {
+                                            EmptyStateView(
+                                                icon: "calendar.badge.clock",
+                                                message: "No jobs for today"
+                                            )
+                                        } else {
                                         ForEach(groupedJobs.keys.sorted(by: statusSort), id: \.self) { status in
                                             if let jobs = groupedJobs[status], !jobs.isEmpty {
                                                 VStack(alignment: .leading, spacing: 12) {
@@ -243,7 +280,12 @@ struct AdminDashboard: View {
                                                     .padding(.horizontal, 20)
 
                                                     ForEach(jobs) { job in
-                                                        AdminJobRow(job: job)
+                                                        NavigationLink {
+                                                            JobDetailView(job: job)
+                                                                .environmentObject(authManager)
+                                                        } label: {
+                                                            AdminJobRow(job: job)
+                                                        }
                                                     }
                                                 }
                                             }
@@ -252,7 +294,7 @@ struct AdminDashboard: View {
                                 }
 
                                 // Reschedule Requests
-                                if !rescheduleRequests.isEmpty {
+                                if !pendingReschedules.isEmpty {
                                     VStack(alignment: .leading, spacing: 12) {
                                         HStack {
                                             Image(systemName: "calendar.badge.exclamationmark")
@@ -260,14 +302,20 @@ struct AdminDashboard: View {
                                             Text("Reschedule Requests")
                                                 .font(.headline)
                                             Spacer()
-                                            Text("\(rescheduleRequests.count)")
+                                            Text("\(pendingReschedules.count)")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
                                         }
                                         .padding(.horizontal, 20)
 
-                                        ForEach(rescheduleRequests) { job in
-                                            RescheduleCard(job: job)
+                                        ForEach(pendingReschedules) { job in
+                                            RescheduleCard(
+                                                job: job,
+                                                isApproving: approvingJobIds.contains(job.id ?? ""),
+                                                onApprove: { date in
+                                                    approveReschedule(job: job, newDate: date)
+                                                }
+                                            )
                                         }
                                     }
                                 }
@@ -441,7 +489,7 @@ struct AdminDashboard: View {
                                     ForEach(licensePlates, id: \.plateNum) { plate in
                                         VehicleCard(
                                             plate: plate,
-                                            teamMembers: teamMembers(for: plate)
+                                            team: getTeam(for: plate)
                                         )
                                     }
                                 }
@@ -481,6 +529,7 @@ struct AdminDashboard: View {
     private func loadData() async {
         isLoading = true
         errorMessage = nil  // Clear previous errors
+        approvingJobIds.removeAll()
 
         // Load clock records
         firestoreManager.getTodayClockedInEmployees { result in
@@ -496,6 +545,17 @@ struct AdminDashboard: View {
             }
         }
 
+        firestoreManager.getPendingRescheduleRequests { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let jobs):
+                    pendingReschedules = jobs
+                case .failure(let error):
+                    print("❌ [AdminDashboard] Error loading reschedule requests: \(error.localizedDescription)")
+                }
+            }
+        }
+
         // Load today's jobs
         firestoreManager.getAllJobsForToday { result in
             DispatchQueue.main.async {
@@ -506,6 +566,17 @@ struct AdminDashboard: View {
                 case .failure(let error):
                     print("❌ [AdminDashboard] Error loading jobs: \(error.localizedDescription)")
                     errorMessage = "Failed to load jobs: \(error.localizedDescription)"
+                }
+            }
+        }
+
+        firestoreManager.getPendingRescheduleRequests { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let jobs):
+                    pendingReschedules = jobs
+                case .failure(let error):
+                    print("❌ [AdminDashboard] Error loading reschedule requests: \(error.localizedDescription)")
                 }
             }
         }
@@ -601,12 +672,9 @@ struct AdminDashboard: View {
         }
     }
 
-    private func teamMembers(for plate: LicensePlate) -> [String]? {
-        guard let teamId = plate.currentTeamId else { return plate.currentTeamMembers }
-        if let team = teams.first(where: { $0.id == teamId }) {
-            return team.members.map { $0.employeeName }
-        }
-        return plate.currentTeamMembers
+    private func getTeam(for plate: LicensePlate) -> Team? {
+        guard let teamId = plate.currentTeamId else { return nil }
+        return teams.first(where: { $0.id == teamId })
     }
 }
 
@@ -700,7 +768,7 @@ private struct CompactJobStats: View {
 // MARK: - Vehicle Card
 private struct VehicleCard: View {
     let plate: LicensePlate
-    let teamMembers: [String]?
+    let team: Team?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -715,33 +783,63 @@ private struct VehicleCard: View {
                 }
             }
 
-            if let driver = plate.currentDriverName {
-                Label(driver, systemImage: "person.fill")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            // Display based on team assignment
+            if let team = team {
+                // Vehicle assigned to a team - show team leader and members
+                VStack(alignment: .leading, spacing: 6) {
+                    // Team Leader
+                    Text("Team Leader: \(team.leaderName)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+
+                    // Team Members
+                    if !team.members.isEmpty {
+                        Divider()
+                            .padding(.vertical, 2)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Team Members:")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+
+                            ForEach(team.members, id: \.employeeId) { member in
+                                HStack(spacing: 6) {
+                                    Image(systemName: "person.circle.fill")
+                                        .font(.caption2)
+                                        .foregroundColor(.blue.opacity(0.6))
+                                    Text(member.employeeName)
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+
+                                    if let role = member.employeeRole {
+                                        Text("•")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                        Text(role)
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if let driver = plate.currentDriverName {
+                // Vehicle assigned to individual employee (not in team)
+                HStack(spacing: 6) {
+                    Image(systemName: "person.fill")
+                        .font(.caption)
+                        .foregroundColor(.blue.opacity(0.7))
+                    Text(driver)
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                }
             } else {
+                // Vehicle not assigned
                 Text(plate.available ? "Available" : "Unavailable")
                     .font(.caption)
                     .foregroundColor(plate.available ? .green : .red)
-            }
-
-            if let team = plate.currentTeamName {
-                Label(team, systemImage: "person.3.fill")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            let membersToShow = teamMembers ?? plate.currentTeamMembers
-            if let members = membersToShow, !members.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Members")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Text(members.joined(separator: ", "))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                }
             }
         }
         .padding(14)
@@ -767,12 +865,14 @@ private struct VehicleCard: View {
 // MARK: - Reschedule Card
 private struct RescheduleCard: View {
     let job: Job
+    let isApproving: Bool
+    let onApprove: (Date?) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(job.clientName)
+                    Text(job.clientName ?? "")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                     if let newDate = job.rescheduleRequest?.newProposedDate {
@@ -782,13 +882,42 @@ private struct RescheduleCard: View {
                     }
                 }
                 Spacer()
-                JobStatusBadge(status: job.status)
+                if let status = job.status {
+                    JobStatusBadge(status: status)
+                }
             }
 
             if let reason = job.rescheduleRequest?.reason, !reason.isEmpty {
                 Text(reason)
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
+
+            HStack {
+                if let proposed = job.rescheduleRequest?.newProposedDate {
+                    Text("Proposed: \(formatDate(proposed))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Button {
+                    onApprove(job.rescheduleRequest?.newProposedDate)
+                } label: {
+                    if isApproving {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .green))
+                    } else {
+                        Label("Approve", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.green.opacity(0.15))
+                )
+                .disabled(isApproving)
             }
         }
         .padding(14)
@@ -1101,34 +1230,44 @@ struct AdminJobRow: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(job.clientName)
+                    Text(job.clientName ?? "Customer")
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                    Text(job.jobType.rawValue)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    if let doli = job.doliNumber, !doli.isEmpty {
+                        Text("DOLI: \(doli)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 6) {
-                    JobStatusBadge(status: job.status)
-                    Text(job.scheduledTime)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    if let status = job.status {
+                        JobStatusBadge(status: status)
+                    }
                 }
             }
 
-            HStack(spacing: 8) {
-                Label(job.assignedEmployeeName, systemImage: "person.fill")
+            if let teamName = job.assignedTeamName {
+                Label("Team: \(teamName)", systemImage: "person.3.fill")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            } else if let assigned = job.assignedEmployeeName, !assigned.isEmpty {
+                Label("Assigned: \(assigned)", systemImage: "person.fill")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
-                if let teamName = job.assignedTeamName {
-                    Divider()
-                    Label(teamName, systemImage: "person.3.fill")
+            if let members = job.assignedTeamMembers, !members.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "person.2.fill")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                    Text(members.joined(separator: ", "))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
                 }
             }
 

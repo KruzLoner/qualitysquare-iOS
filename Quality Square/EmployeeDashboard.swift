@@ -489,30 +489,34 @@ struct JobRowView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(job.clientName)
+                    Text(job.clientName ?? "")
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    HStack(spacing: 6) {
-                        Image(systemName: "tag.fill")
-                            .font(.caption)
-                        Text(job.jobType.rawValue)
-                            .font(.caption)
+                    if let doli = job.doliNumber, !doli.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "number.circle")
+                                .font(.caption)
+                            Text("DOLI: \(doli)")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.secondary)
                     }
-                    .foregroundColor(.secondary)
                 }
                 
                 Spacer()
-                
-                JobStatusBadge(status: job.status)
+
+                if let status = job.status {
+                    JobStatusBadge(status: status)
+                }
             }
             
             HStack(spacing: 16) {
-                Label(job.scheduledTime, systemImage: "clock")
+                Label(job.timeFrame ?? job.scheduledTime ?? "", systemImage: "clock")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
-                Label(job.clientAddress, systemImage: "location.fill")
+
+                Label(job.clientAddress ?? "", systemImage: "location.fill")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
