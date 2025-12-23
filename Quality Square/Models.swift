@@ -353,6 +353,7 @@ struct RescheduleRequest: Codable {
     var reason: String
     var newProposedDate: Date?
     var isApproved: Bool?
+    var approvedDate: Date?
 
     enum CodingKeys: String, CodingKey {
         case requestedBy
@@ -360,6 +361,7 @@ struct RescheduleRequest: Codable {
         case reason
         case newProposedDate
         case isApproved
+        case approvedDate
     }
 }
 

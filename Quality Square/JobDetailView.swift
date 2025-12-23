@@ -241,7 +241,7 @@ struct JobDetailView: View {
                     .padding(.horizontal, 20)
                     
                     // Reschedule Request Info (if any)
-                    if let reschedule = job.rescheduleRequest {
+                    if let reschedule = job.rescheduleRequest, reschedule.isApproved != true {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("Reschedule Request", systemImage: "clock.arrow.2.circlepath")
                                 .font(.headline)
@@ -336,7 +336,13 @@ struct JobDetailView: View {
                                     )
                                     .foregroundColor(.primary)
                             }
-                            .disabled(isUpdating || job.status == .completed || job.status == nil)
+                            .disabled(isUpdating || rescheduleApproved || job.status == .completed || job.status == nil)
+
+                            if rescheduleApproved {
+                                Text("Reschedule approved — job locked")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 8)
@@ -386,7 +392,11 @@ struct JobDetailView: View {
     }
     
     private var canAdvance: Bool {
-        nextStatus != nil
+        nextStatus != nil && !rescheduleApproved
+    }
+
+    private var rescheduleApproved: Bool {
+        job.rescheduleRequest?.isApproved == true || job.status == .rescheduled
     }
     
     private func advanceStatus() {

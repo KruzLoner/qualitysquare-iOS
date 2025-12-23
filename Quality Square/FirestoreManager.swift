@@ -81,15 +81,22 @@ class FirestoreManager: ObservableObject {
                 let now = Date()
                 let clockInDate = (document.data()["clockIn"] as? Timestamp)?.dateValue() ?? now
                 let durationHours = now.timeIntervalSince(clockInDate) / 3600
-                
-                self?.db.collection("timeEntries").document(document.documentID).updateData([
-                    "clockOut": Timestamp(date: now),
-                    "duration": durationHours
-                ]) { error in
-                    if let error = error {
-                        completion(.failure(error))
-                    } else {
-                        completion(.success(()))
+
+                self?.getActivePayPeriodId { activePayPeriodId in
+                    var updateData: [String: Any] = [
+                        "clockOut": Timestamp(date: now),
+                        "duration": durationHours
+                    ]
+                    if let activePayPeriodId = activePayPeriodId {
+                        updateData["payPeriodId"] = activePayPeriodId
+                    }
+
+                    self?.db.collection("timeEntries").document(document.documentID).updateData(updateData) { updateError in
+                        if let updateError = updateError {
+                            completion(.failure(updateError))
+                        } else {
+                            completion(.success(()))
+                        }
                     }
                 }
             }
@@ -129,6 +136,51 @@ class FirestoreManager: ObservableObject {
                 } catch {
                     completion(.failure(error))
                 }
+            }
+    }
+
+    private func getActivePayPeriodId(completion: @escaping (String?) -> Void) {
+        db.collection("payPeriods")
+            .limit(to: 50)
+            .getDocuments { [weak self] snapshot, _ in
+                guard let self = self, let documents = snapshot?.documents else {
+                    completion(nil)
+                    return
+                }
+
+                let now = Date()
+                var candidates: [(id: String, startDate: Date?)] = []
+
+                for doc in documents {
+                    let data = doc.data()
+                    let startDate = (data["startDate"] as? Timestamp)?.dateValue()
+                        ?? self.parseDate(from: data["startDate"] as? String ?? "")
+                    let endDate = (data["endDate"] as? Timestamp)?.dateValue()
+                        ?? self.parseDate(from: data["endDate"] as? String ?? "")
+
+                    if let isActive = data["isActive"] as? Bool, isActive {
+                        candidates.append((doc.documentID, startDate))
+                        continue
+                    }
+                    if let isActive = data["active"] as? Bool, isActive {
+                        candidates.append((doc.documentID, startDate))
+                        continue
+                    }
+                    if let status = data["status"] as? String, status.lowercased() == "active" {
+                        candidates.append((doc.documentID, startDate))
+                        continue
+                    }
+
+                    if let startDate = startDate, let endDate = endDate, now >= startDate, now <= endDate {
+                        candidates.append((doc.documentID, startDate))
+                    }
+                }
+
+                let selected = candidates.sorted { lhs, rhs in
+                    (lhs.startDate ?? Date.distantPast) > (rhs.startDate ?? Date.distantPast)
+                }.first
+
+                completion(selected?.id)
             }
     }
     
@@ -295,11 +347,13 @@ class FirestoreManager: ObservableObject {
     }
     
     func approveReschedule(jobId: String, newDate: Date?, completion: @escaping (Result<Void, Error>) -> Void) {
+        let approvedDate = Timestamp(date: Date())
         var updateData: [String: Any] = [
             "status": JobStatus.rescheduled.rawValue,
             "requests.status": JobStatus.rescheduled.rawValue,
             "requests.reschedule.isApproved": true,
-            "updatedAt": Timestamp(date: Date())
+            "requests.reschedule.approvedDate": approvedDate,
+            "updatedAt": approvedDate
         ]
         
         if let date = newDate {
@@ -711,11 +765,31 @@ class FirestoreManager: ObservableObject {
         let jobStatusRaw = cleanString(requestData?["status"] as? String) ?? cleanString(data["status"] as? String) ?? job.status?.rawValue ?? ""
         job.status = mapStatus(from: jobStatusRaw)
 
+        var reschedule: RescheduleRequest?
+        if let rescheduleData = data["rescheduleRequest"] as? [String: Any] {
+            let reason = rescheduleData["reason"] as? String ?? ""
+            let requestedBy = rescheduleData["requestedBy"] as? String ?? ""
+            let requestedDate = (rescheduleData["requestedDate"] as? Timestamp)?.dateValue() ?? Date()
+            let newDate = (rescheduleData["newProposedDate"] as? Timestamp)?.dateValue()
+            let approved = rescheduleData["isApproved"] as? Bool
+            let approvedDate = (rescheduleData["approvedDate"] as? Timestamp)?.dateValue()
+            reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved, approvedDate: approvedDate)
+        } else if let rescheduleData = requestData?["reschedule"] as? [String: Any] {
+            let reason = rescheduleData["reason"] as? String ?? ""
+            let requestedBy = rescheduleData["requestedBy"] as? String ?? ""
+            let requestedDate = (rescheduleData["requestedDate"] as? Timestamp)?.dateValue() ?? Date()
+            let newDate = (rescheduleData["newProposedDate"] as? Timestamp)?.dateValue()
+            let approved = rescheduleData["isApproved"] as? Bool
+            let approvedDate = (rescheduleData["approvedDate"] as? Timestamp)?.dateValue()
+            reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved, approvedDate: approvedDate)
+        }
+
         job.assignedEmployeeId = assignedEmployeeId ?? job.assignedEmployeeId ?? (assignedTeamId ?? "unassigned")
         job.assignedEmployeeName = assignedEmployeeName ?? job.assignedEmployeeName ?? assignedTeamName ?? "Team Job"
         job.assignedTeamId = assignedTeamId ?? job.assignedTeamId
         job.assignedTeamName = assignedTeamName ?? job.assignedTeamName
         job.assignedTeamMembers = job.assignedTeamMembers ?? teamMembers
+        job.rescheduleRequest = reschedule ?? job.rescheduleRequest
 
         return job
     }
@@ -828,14 +902,16 @@ class FirestoreManager: ObservableObject {
             let requestedDate = (rescheduleData["requestedDate"] as? Timestamp)?.dateValue() ?? Date()
             let newDate = (rescheduleData["newProposedDate"] as? Timestamp)?.dateValue()
             let approved = rescheduleData["isApproved"] as? Bool
-            reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved)
+            let approvedDate = (rescheduleData["approvedDate"] as? Timestamp)?.dateValue()
+            reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved, approvedDate: approvedDate)
         } else if let rescheduleData = requestData?["reschedule"] as? [String: Any] {
             let reason = rescheduleData["reason"] as? String ?? ""
             let requestedBy = rescheduleData["requestedBy"] as? String ?? ""
             let requestedDate = (rescheduleData["requestedDate"] as? Timestamp)?.dateValue() ?? Date()
             let newDate = (rescheduleData["newProposedDate"] as? Timestamp)?.dateValue()
             let approved = rescheduleData["isApproved"] as? Bool
-            reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved)
+            let approvedDate = (rescheduleData["approvedDate"] as? Timestamp)?.dateValue()
+            reschedule = RescheduleRequest(requestedBy: requestedBy, requestedDate: requestedDate, reason: reason, newProposedDate: newDate, isApproved: approved, approvedDate: approvedDate)
         }
 
         job.createdAt = createdAt ?? job.createdAt
@@ -980,6 +1056,7 @@ class FirestoreManager: ObservableObject {
             "currentDriverName": FieldValue.delete(),
             "currentTeamId": FieldValue.delete(),
             "currentTeamName": FieldValue.delete(),
+            "currentTeamMembers": FieldValue.delete(),
             "assignedAt": FieldValue.delete(),
             "available": true
         ]) { error in
@@ -989,5 +1066,28 @@ class FirestoreManager: ObservableObject {
                 completion(.success(()))
             }
         }
+    }
+
+    func clearLicensePlateAssignment(plate: LicensePlate, completion: @escaping (Result<Void, Error>) -> Void) {
+        if let plateId = plate.id {
+            clearLicensePlateAssignment(plateId: plateId, completion: completion)
+            return
+        }
+
+        db.collection("LicensePlate")
+            .whereField("plateNum", isEqualTo: plate.plateNum)
+            .limit(to: 1)
+            .getDocuments { snapshot, error in
+                if let error = error {
+                    completion(.failure(error))
+                    return
+                }
+                guard let doc = snapshot?.documents.first else {
+                    completion(.failure(NSError(domain: "FirestoreManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "Vehicle not found"])))
+                    return
+                }
+                let plateId = doc.documentID
+                self.clearLicensePlateAssignment(plateId: plateId, completion: completion)
+            }
     }
 }

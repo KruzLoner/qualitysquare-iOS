@@ -404,10 +404,18 @@ struct EmployeeDashboard: View {
     }
 
     private func releaseVehicle() {
-        guard let plateId = selectedPlate?.id else { return }
-        firestoreManager.clearLicensePlateAssignment(plateId: plateId) { _ in }
-        selectedPlate = nil
-        Task { await loadData() }
+        guard let plate = selectedPlate else { return }
+        firestoreManager.clearLicensePlateAssignment(plate: plate) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    selectedPlate = nil
+                    Task { await loadData() }
+                case .failure(let error):
+                    errorMessage = "Release failed: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     private func preselectPlate(from plates: [LicensePlate]) {
